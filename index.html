@@ -24,6 +24,34 @@
             align-items: center;
             text-align: center;
         }
+        .scoreboard {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            width: min(85vw, 620px);
+            max-width: 620px;
+            margin-bottom: 10px;
+            font-size: 1.2rem;
+            color: #f1c40f;
+            text-shadow: 0 0 8px rgba(241, 196, 15, 0.6);
+        }
+        .scoreboard span:first-child {
+            text-align: left;
+        }
+        .scoreboard span:last-child {
+            text-align: right;
+        }
+        .scoreboard .score-label {
+            margin-right: 0.35em;
+        }
+        .scoreboard .player1-label {
+            color: #2ecc71;
+            text-shadow: 0 0 8px rgba(46, 204, 113, 0.6);
+        }
+        .scoreboard .player2-label {
+            color: #3498db;
+            text-shadow: 0 0 8px rgba(52, 152, 219, 0.6);
+        }
         canvas {
             background-color: #2c3e50;
             border-radius: 15px;
@@ -39,24 +67,27 @@
         }
         .controls {
             display: flex;
-            justify-content: center;
-            width: 90vw;
-            max-width: 600px;
-            margin-top: 15px;
-            gap: 15px;
+            justify-content: space-between;
+            width: min(85vw, 620px);
+            max-width: 620px;
+            margin-top: 12px;
+            gap: 18px;
         }
         .control-panel {
+            flex: 1 1 calc(50% - 9px);
             background: #2c3e50;
-            padding: 10px 15px;
-            border-radius: 8px;
-            box-shadow: 0 0 8px rgba(0,0,0,0.5);
+            padding: 8px 12px;
+            border-radius: 10px;
+            box-shadow: 0 0 8px rgba(0,0,0,0.45);
             margin: 0;
         }
         .control-panel h2 {
             margin-top: 0;
-            margin-bottom: 8px;
-            font-size: 1rem;
-            color: #e74c3c;
+            margin-bottom: 6px;
+            font-size: 0.95rem;
+            text-align: center;
+            color: inherit;
+            text-shadow: 0 0 6px rgba(0,0,0,0.4);
         }
         .control-panel ul {
             list-style: none;
@@ -74,15 +105,33 @@
             color: #f1c40f;
             margin-right: 1em;
         }
+        .player1-panel {
+            border: 1px solid rgba(46, 204, 113, 0.2);
+        }
+        .player2-panel {
+            border: 1px solid rgba(52, 152, 219, 0.2);
+        }
+        .player1-panel h2 {
+            color: #2ecc71;
+            text-shadow: 0 0 8px rgba(46, 204, 113, 0.5);
+        }
+        .player2-panel h2 {
+            color: #3498db;
+            text-shadow: 0 0 8px rgba(52, 152, 219, 0.5);
+        }
     </style>
 </head>
 <body>
     <div class="game-container">
         <h1>Tank Battle</h1>
+        <div class="scoreboard">
+            <span><span class="score-label player1-label">Player 1:</span> <strong id="player1ScoreDisplay">0</strong></span>
+            <span><span class="score-label player2-label">Player 2:</span> <strong id="player2ScoreDisplay">0</strong></span>
+        </div>
         <canvas id="gameCanvas"></canvas>
         <div class="controls">
-            <div class="control-panel">
-                <h2>Player 1 (Green)</h2>
+            <div class="control-panel player1-panel">
+                <h2>Player 1</h2>
                 <ul>
                     <li><strong>Forward:</strong> W</li>
                     <li><strong>Backward:</strong> S</li>
@@ -91,8 +140,8 @@
                     <li><strong>Fire:</strong> Z</li>
                 </ul>
             </div>
-            <div class="control-panel">
-                <h2>Player 2 (Blue)</h2>
+            <div class="control-panel player2-panel">
+                <h2>Player 2</h2>
                 <ul>
                     <li><strong>Forward:</strong> Up Arrow</li>
                     <li><strong>Backward:</strong> Down Arrow</li>
@@ -107,6 +156,8 @@
     <script>
         const canvas = document.getElementById('gameCanvas');
         const ctx = canvas.getContext('2d');
+        const player1ScoreDisplay = document.getElementById('player1ScoreDisplay');
+        const player2ScoreDisplay = document.getElementById('player2ScoreDisplay');
 
         // --- Game Setup ---
         let canvasWidth = Math.min(window.innerWidth * 0.9, 1000);
@@ -191,6 +242,9 @@
         const TURN_SPEED = 2.5 * Math.PI / 180;
         const BULLET_SPEED = 5;
         const FIRE_RATE = 500;
+        const BARRIER_SPAWN_CHANCE = 0.06;
+        const BARRIER_MIN_LENGTH = 2;
+        const BARRIER_MAX_LENGTH = 5;
 
         // Use the combined width for collision radius (main body + track width)
         const TANK_COLLISION_RADIUS = TANK_SIZE / 2; 
@@ -320,6 +374,7 @@
                 this.angle = angle;
                 this.color = color;
                 this.speed = BULLET_SPEED;
+                this.hasBounced = false;
             }
             
             update() {
@@ -401,6 +456,32 @@
 
         const player2 = new Tank(canvas.width - TANK_START_MARGIN, canvas.height / 2, '#3498db', '#2980b9');
         player2.angle = Math.PI;
+
+        function updateScoreboard() {
+            player1ScoreDisplay.textContent = player1Score;
+            player2ScoreDisplay.textContent = player2Score;
+        }
+
+        function bounceBulletOffBarrier(bullet, barrier) {
+            const dx = bullet.x - barrier.x;
+            const dy = bullet.y - barrier.y;
+            const halfWidth = barrier.width / 2;
+            const halfHeight = barrier.height / 2;
+            const overlapX = halfWidth + bullet.radius - Math.abs(dx);
+            const overlapY = halfHeight + bullet.radius - Math.abs(dy);
+
+            if (overlapX < overlapY) {
+                const approach = Math.cos(bullet.angle);
+                bullet.angle = Math.PI - bullet.angle;
+                const direction = dx === 0 ? (approach >= 0 ? 1 : -1) : (dx > 0 ? 1 : -1);
+                bullet.x = barrier.x + direction * (halfWidth + bullet.radius + 0.1);
+            } else {
+                const approach = Math.sin(bullet.angle);
+                bullet.angle = -bullet.angle;
+                const direction = dy === 0 ? (approach >= 0 ? 1 : -1) : (dy > 0 ? 1 : -1);
+                bullet.y = barrier.y + direction * (halfHeight + bullet.radius + 0.1);
+            }
+        }
         
         function generateBarriers() {
             barriers.length = 0;
@@ -415,8 +496,8 @@
                     const key = `${col},${row}`;
                     if (occupied.has(key) || col < safeZoneCols) continue;
 
-                    if (Math.random() < 0.1) {
-                        const wallLength = Math.floor(Math.random() * 5) + 3;
+                    if (Math.random() < BARRIER_SPAWN_CHANCE) {
+                        const wallLength = Math.floor(Math.random() * (BARRIER_MAX_LENGTH - BARRIER_MIN_LENGTH + 1)) + BARRIER_MIN_LENGTH;
                         const direction = Math.random() < 0.5 ? 'horizontal' : 'vertical';
                         let currentCol = col;
                         let currentRow = row;
@@ -505,13 +586,23 @@
                     if (bullet.x > barrier.x - barrier.width / 2 && bullet.x < barrier.x + barrier.width / 2 &&
                         bullet.y > barrier.y - barrier.height / 2 && bullet.y < barrier.y + barrier.height / 2) {
                         
+                        const hadMoreThanOneHealth = barrier.health > 1;
                         barrier.takeDamage();
                         if (barrier.health <= 0) {
                             playBarrierBreakSound();
                             barriers.splice(j, 1);
-                        } else {
-                            playBarrierHitSound();
+                            bullets.splice(i, 1);
+                            continue bulletsLoop;
                         }
+
+                        playBarrierHitSound();
+
+                        if (!bullet.hasBounced && hadMoreThanOneHealth) {
+                            bounceBulletOffBarrier(bullet, barrier);
+                            bullet.hasBounced = true;
+                            continue bulletsLoop;
+                        }
+
                         bullets.splice(i, 1);
                         continue bulletsLoop;
                     }
@@ -521,6 +612,7 @@
                 const dist1 = Math.hypot(bullet.x - player1.x, bullet.y - player1.y);
                 if (dist1 < TANK_COLLISION_RADIUS && !player1.isHit) { // Use TANK_COLLISION_RADIUS for bullet-tank
                     player2Score++;
+                    updateScoreboard();
                     bullets.splice(i, 1);
                     explosions.push(new Explosion(player1.x, player1.y));
                     playExplosionSound();
@@ -532,6 +624,7 @@
                 const dist2 = Math.hypot(bullet.x - player2.x, bullet.y - player2.y);
                 if (dist2 < TANK_COLLISION_RADIUS && !player2.isHit) { // Use TANK_COLLISION_RADIUS for bullet-tank
                     player1Score++;
+                    updateScoreboard();
                     bullets.splice(i, 1);
                     explosions.push(new Explosion(player2.x, player2.y));
                     playExplosionSound();
@@ -540,8 +633,48 @@
                     continue;
                 }
                 
-                if (bullet.x < 0 || bullet.x > canvas.width || bullet.y < 0 || bullet.y > canvas.height) {
+                if (bullet.x - bullet.radius <= 0) {
+                    if (!bullet.hasBounced) {
+                        bullet.angle = Math.PI - bullet.angle;
+                        bullet.x = bullet.radius + 0.1;
+                        bullet.hasBounced = true;
+                        continue bulletsLoop;
+                    }
                     bullets.splice(i, 1);
+                    continue bulletsLoop;
+                }
+
+                if (bullet.x + bullet.radius >= canvas.width) {
+                    if (!bullet.hasBounced) {
+                        bullet.angle = Math.PI - bullet.angle;
+                        bullet.x = canvas.width - bullet.radius - 0.1;
+                        bullet.hasBounced = true;
+                        continue bulletsLoop;
+                    }
+                    bullets.splice(i, 1);
+                    continue bulletsLoop;
+                }
+
+                if (bullet.y - bullet.radius <= 0) {
+                    if (!bullet.hasBounced) {
+                        bullet.angle = -bullet.angle;
+                        bullet.y = bullet.radius + 0.1;
+                        bullet.hasBounced = true;
+                        continue bulletsLoop;
+                    }
+                    bullets.splice(i, 1);
+                    continue bulletsLoop;
+                }
+
+                if (bullet.y + bullet.radius >= canvas.height) {
+                    if (!bullet.hasBounced) {
+                        bullet.angle = -bullet.angle;
+                        bullet.y = canvas.height - bullet.radius - 0.1;
+                        bullet.hasBounced = true;
+                        continue bulletsLoop;
+                    }
+                    bullets.splice(i, 1);
+                    continue bulletsLoop;
                 }
             }
         }
@@ -559,19 +692,10 @@
             tank.isHit = false;
         }
         
-        function drawScores() {
-             ctx.fillStyle = 'white';
-             ctx.font = '30px Bungee';
-             ctx.textAlign = 'left';
-             ctx.fillText(`Player 1: ${player1Score}`, 20, 40);
-             ctx.textAlign = 'right';
-             ctx.fillText(`Player 2: ${player2Score}`, canvas.width - 20, 40);
-        }
-
         function gameLoop() {
             ctx.clearRect(0, 0, canvas.width, canvas.height);
             handleInput();
-            
+
             barriers.forEach(barrier => barrier.draw());
             
             bullets.forEach(bullet => {
@@ -591,14 +715,12 @@
 
             player1.draw();
             player2.draw();
-            drawScores();
             requestAnimationFrame(gameLoop);
         }
 
         generateBarriers();
+        updateScoreboard();
         gameLoop();
     </script>
 </body>
 </html>
-
-
