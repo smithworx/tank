@@ -2,6 +2,8 @@
 
 Tank Battle is a fast-paced two-player arcade game built with HTML5 canvas and vanilla JavaScript. Pilot stylized tanks across a barrier-strewn battlefield, dodge incoming fire, and line up the perfect shot to reach the winning score first.
 
+![Screenshot of Tank Battle gameplay](assets/tank-battle-screenshot.gif)
+
 ## Features
 - Responsive playfield that adapts to the browser window while keeping gameplay balanced.
 - Local head-to-head tank combat with unique key bindings for each player.
