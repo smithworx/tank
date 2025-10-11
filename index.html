@@ -119,17 +119,59 @@
             color: #3498db;
             text-shadow: 0 0 8px rgba(52, 152, 219, 0.5);
         }
+        
+        .game-mode-selector {
+            margin-bottom: 20px;
+            text-align: center;
+        }
+        
+        .game-mode-selector h2 {
+            color: #f1c40f;
+            font-size: 1.5rem;
+            margin-bottom: 15px;
+            text-shadow: 0 0 8px rgba(241, 196, 15, 0.6);
+        }
+        
+        .mode-btn {
+            background: linear-gradient(145deg, #3498db, #2980b9);
+            color: white;
+            border: none;
+            padding: 12px 25px;
+            margin: 0 10px;
+            border-radius: 8px;
+            font-family: 'Bungee', cursive;
+            font-size: 1rem;
+            cursor: pointer;
+            box-shadow: 0 4px 8px rgba(0,0,0,0.3);
+            transition: all 0.3s ease;
+        }
+        
+        .mode-btn:hover {
+            background: linear-gradient(145deg, #5dade2, #3498db);
+            transform: translateY(-2px);
+            box-shadow: 0 6px 12px rgba(0,0,0,0.4);
+        }
+        
+        .mode-btn:active {
+            transform: translateY(0px);
+            box-shadow: 0 2px 4px rgba(0,0,0,0.3);
+        }
     </style>
 </head>
 <body>
     <div class="game-container">
         <h1>Tank Battle</h1>
-        <div class="scoreboard">
+        <div id="gameModeSelector" class="game-mode-selector">
+            <h2>Select Game Mode</h2>
+            <button id="twoPlayerBtn" class="mode-btn">Two Player</button>
+            <button id="vsAIBtn" class="mode-btn">vs AI</button>
+        </div>
+        <div class="scoreboard" id="scoreboard" style="display: none;">
             <span><span class="score-label player1-label">Player 1:</span> <strong id="player1ScoreDisplay">0</strong></span>
             <span><span class="score-label player2-label">Player 2:</span> <strong id="player2ScoreDisplay">0</strong></span>
         </div>
-        <canvas id="gameCanvas"></canvas>
-        <div class="controls">
+        <canvas id="gameCanvas" style="display: none;"></canvas>
+        <div class="controls" id="controls" style="display: none;">
             <div class="control-panel player1-panel">
                 <h2>Player 1</h2>
                 <ul>
@@ -306,6 +348,11 @@
         const hazards = []; // Array to store environmental hazards
         let player1Score = 0;
         let player2Score = 0;
+        
+        // Game mode variables
+        let gameMode = null; // 'twoPlayer' or 'vsAI'
+        let gameRunning = false;
+        let roundInProgress = false;
 
         const TANK_SIZE = 40; // Now a square
         const TURRET_LENGTH = 34; // Shortened by 25%
@@ -363,6 +410,13 @@
                 
                 // Draw tracks first (behind the tank)
                 this.drawTracks();
+                
+                // Draw tank body
+                this.drawBody();
+            }
+            
+            drawBody() {
+                if (this.isHit) return;
                 
                 ctx.save();
                 ctx.translate(this.x, this.y);
@@ -494,6 +548,186 @@
             }
         }
         
+        class AITank extends Tank {
+            constructor(x, y, color, turretColor) {
+                super(x, y, color, turretColor);
+                this.target = null; // The target tank (player)
+                this.lastDecisionTime = 0;
+                this.decisionInterval = 100; // Make decisions every 100ms
+                this.strafeDirection = Math.random() > 0.5 ? 1 : -1; // Random initial strafe direction
+                this.aggressiveness = 0.7; // How often to attack vs evade (0-1)
+                this.accuracy = 0.8; // Accuracy multiplier for aiming
+                this.patrolAngle = Math.random() * Math.PI * 2; // Random patrol direction
+                this.lastStrafeChange = 0;
+                this.strafeChangeInterval = 2000; // Change strafe direction every 2 seconds
+            }
+
+            update(playerTank) {
+                if (this.isHit) return;
+                
+                this.target = playerTank;
+                const now = Date.now();
+                
+                // Make AI decisions at regular intervals
+                if (now - this.lastDecisionTime > this.decisionInterval) {
+                    this.makeDecision();
+                    this.lastDecisionTime = now;
+                }
+                
+                // Change strafe direction periodically
+                if (now - this.lastStrafeChange > this.strafeChangeInterval) {
+                    this.strafeDirection *= -1;
+                    this.lastStrafeChange = now;
+                }
+                
+                this.updateTracks();
+            }
+
+            makeDecision() {
+                if (!this.target || this.target.isHit) return;
+
+                const dx = this.target.x - this.x;
+                const dy = this.target.y - this.y;
+                const distance = Math.hypot(dx, dy);
+                const angleToTarget = Math.atan2(dy, dx);
+
+                // Calculate if we have a clear shot
+                const hasLineOfSight = this.checkLineOfSight(this.target);
+
+                if (distance < 200 && hasLineOfSight && Math.random() < this.aggressiveness) {
+                    // Attack mode: aim and shoot
+                    this.aimAtTarget(angleToTarget);
+                    if (Math.random() < 0.6) { // 60% chance to fire when in attack mode
+                        this.fire();
+                    }
+                    
+                    // Strafe while attacking
+                    this.strafe();
+                } else if (distance > 300) {
+                    // Approach mode: move toward player
+                    this.moveToward(angleToTarget);
+                } else {
+                    // Tactical mode: maintain distance and look for opportunities
+                    if (hasLineOfSight && Math.random() < 0.3) {
+                        this.fire();
+                    }
+                    this.strafe();
+                }
+            }
+
+            aimAtTarget(targetAngle) {
+                // Add some inaccuracy based on AI accuracy setting
+                const inaccuracy = (1 - this.accuracy) * (Math.random() - 0.5) * 0.5;
+                const aimAngle = targetAngle + inaccuracy;
+                
+                // Smoothly rotate toward target
+                let angleDiff = aimAngle - this.angle;
+                
+                // Normalize angle difference to [-π, π]
+                while (angleDiff > Math.PI) angleDiff -= 2 * Math.PI;
+                while (angleDiff < -Math.PI) angleDiff += 2 * Math.PI;
+                
+                if (Math.abs(angleDiff) > TURN_SPEED) {
+                    this.rotate(angleDiff > 0 ? 1 : -1);
+                } else {
+                    this.angle = aimAngle;
+                }
+            }
+
+            moveToward(targetAngle) {
+                this.aimAtTarget(targetAngle);
+                
+                // Move forward if roughly facing the right direction
+                const angleDiff = Math.abs(targetAngle - this.angle);
+                if (angleDiff < Math.PI / 3) { // Within 60 degrees
+                    this.moveForward();
+                }
+            }
+
+            strafe() {
+                // Move perpendicular to the target direction
+                const strafeAngle = this.angle + (Math.PI / 2) * this.strafeDirection;
+                const oldX = this.x;
+                const oldY = this.y;
+                
+                this.x += Math.cos(strafeAngle) * TANK_SPEED * 0.7; // Slower strafe
+                this.y += Math.sin(strafeAngle) * TANK_SPEED * 0.7;
+                
+                // Check for collisions and revert if necessary
+                if (this.checkCollisions()) {
+                    this.x = oldX;
+                    this.y = oldY;
+                    this.strafeDirection *= -1; // Change direction if blocked
+                }
+            }
+
+            moveForward() {
+                const oldX = this.x;
+                const oldY = this.y;
+                
+                this.x += Math.cos(this.angle) * TANK_SPEED;
+                this.y += Math.sin(this.angle) * TANK_SPEED;
+                
+                // Check for collisions and revert if necessary
+                if (this.checkCollisions()) {
+                    this.x = oldX;
+                    this.y = oldY;
+                }
+            }
+
+            checkCollisions() {
+                // Check bounds
+                if (this.x - TANK_COLLISION_RADIUS <= 0 || 
+                    this.x + TANK_COLLISION_RADIUS >= canvas.width ||
+                    this.y - TANK_COLLISION_RADIUS <= 0 || 
+                    this.y + TANK_COLLISION_RADIUS >= canvas.height) {
+                    return true;
+                }
+
+                // Check barrier collisions using the same logic as regular tanks
+                for (let barrier of barriers) {
+                    if (barrier.isDestroyed && barrier.isDestroyed()) continue;
+                    if (this.x + TANK_COLLISION_RADIUS > barrier.x - barrier.width/2 && 
+                        this.x - TANK_COLLISION_RADIUS < barrier.x + barrier.width/2 &&
+                        this.y + TANK_COLLISION_RADIUS > barrier.y - barrier.height/2 && 
+                        this.y - TANK_COLLISION_RADIUS < barrier.y + barrier.height/2) {
+                        return true;
+                    }
+                }
+
+                // Check collision with player tank
+                if (this.target && Math.hypot(this.x - this.target.x, this.y - this.target.y) < (TANK_COLLISION_RADIUS * 2)) {
+                    return true;
+                }
+
+                return false;
+            }
+
+            checkLineOfSight(target) {
+                // Simple line of sight check - trace a line to the target
+                const dx = target.x - this.x;
+                const dy = target.y - this.y;
+                const distance = Math.hypot(dx, dy);
+                const steps = Math.floor(distance / 10); // Check every 10 pixels
+                
+                for (let i = 1; i < steps; i++) {
+                    const checkX = this.x + (dx * i / steps);
+                    const checkY = this.y + (dy * i / steps);
+                    
+                    // Check if this point intersects with any barrier using center-based coordinates
+                    for (let barrier of barriers) {
+                        if (barrier.isDestroyed && barrier.isDestroyed()) continue;
+                        if (checkX > barrier.x - barrier.width/2 && checkX < barrier.x + barrier.width/2 &&
+                            checkY > barrier.y - barrier.height/2 && checkY < barrier.y + barrier.height/2) {
+                            return false;
+                        }
+                    }
+                }
+                
+                return true;
+            }
+        }
+        
         class Barrier {
             constructor(x, y, width, height, options = {}) {
                 this.x = x;
@@ -550,9 +784,75 @@
                     }
                     const healthRatio = this.health / this.maxHealth;
                     const brightness = 35 + 20 * healthRatio;
-                    ctx.fillStyle = `hsl(${baseHue}, ${saturation}%, ${brightness}%)`;
-                    ctx.strokeStyle = `hsl(${baseHue}, ${saturation}%, ${brightness - 20}%)`;
+                    
+                    // Add drop shadow for depth
+                    ctx.fillStyle = 'rgba(0, 0, 0, 0.3)';
+                    ctx.fillRect(this.x - this.width / 2 + 3, this.y - this.height / 2 + 3, this.width, this.height);
+                    
+                    // Create 3D gradient (lighter top-left, darker bottom-right)
+                    const gradient = ctx.createLinearGradient(
+                        this.x - this.width / 2, this.y - this.height / 2,
+                        this.x + this.width / 2, this.y + this.height / 2
+                    );
+                    gradient.addColorStop(0, `hsl(${baseHue}, ${saturation}%, ${brightness + 15}%)`);
+                    gradient.addColorStop(1, `hsl(${baseHue}, ${saturation}%, ${brightness - 10}%)`);
+                    
+                    ctx.fillStyle = gradient;
                     ctx.fillRect(this.x - this.width / 2, this.y - this.height / 2, this.width, this.height);
+                    
+                    // Add brick pattern
+                    ctx.strokeStyle = `hsl(${baseHue}, ${saturation}%, ${brightness - 15}%)`;
+                    ctx.lineWidth = 1;
+                    ctx.globalAlpha = 0.6;
+                    
+                    const brickHeight = 8; // Height of each brick row
+                    const brickWidth = 16; // Width of individual bricks
+                    const startX = this.x - this.width / 2;
+                    const startY = this.y - this.height / 2;
+                    
+                    // Draw horizontal mortar lines
+                    for (let y = brickHeight; y < this.height; y += brickHeight) {
+                        ctx.beginPath();
+                        ctx.moveTo(startX + 1, startY + y);
+                        ctx.lineTo(startX + this.width - 1, startY + y);
+                        ctx.stroke();
+                    }
+                    
+                    // Draw vertical mortar lines (offset every other row for brick pattern)
+                    let rowCount = 0;
+                    for (let y = 0; y < this.height; y += brickHeight) {
+                        const offset = (rowCount % 2) * (brickWidth / 2); // Offset every other row
+                        for (let x = brickWidth + offset; x < this.width + offset; x += brickWidth) {
+                            if (x >= 0 && x <= this.width) {
+                                ctx.beginPath();
+                                ctx.moveTo(startX + x, startY + y + 1);
+                                ctx.lineTo(startX + x, startY + Math.min(y + brickHeight - 1, this.height - 1));
+                                ctx.stroke();
+                            }
+                        }
+                        rowCount++;
+                    }
+                    
+                    ctx.globalAlpha = 1;
+                    
+                    // Add highlight on top edge
+                    ctx.strokeStyle = `hsl(${baseHue}, ${saturation}%, ${brightness + 25}%)`;
+                    ctx.lineWidth = 2;
+                    ctx.beginPath();
+                    ctx.moveTo(this.x - this.width / 2, this.y - this.height / 2);
+                    ctx.lineTo(this.x + this.width / 2, this.y - this.height / 2);
+                    ctx.stroke();
+                    
+                    // Add shadow on bottom edge
+                    ctx.strokeStyle = `hsl(${baseHue}, ${saturation}%, ${brightness - 25}%)`;
+                    ctx.beginPath();
+                    ctx.moveTo(this.x - this.width / 2, this.y + this.height / 2);
+                    ctx.lineTo(this.x + this.width / 2, this.y + this.height / 2);
+                    ctx.stroke();
+                    
+                    // Main border
+                    ctx.strokeStyle = `hsl(${baseHue}, ${saturation}%, ${brightness - 20}%)`;
+                    ctx.lineWidth = 1;
                     ctx.strokeRect(this.x - this.width / 2, this.y - this.height / 2, this.width, this.height);
 
                     ctx.strokeStyle = 'rgba(0, 0, 0, 0.7)';
@@ -570,21 +870,85 @@
                     }
                     ctx.stroke();
                 } else if (this.type === 'indestructible') {
-                    const gradient = ctx.createLinearGradient(this.x - this.width / 2, this.y - this.height / 2, this.x + this.width / 2, this.y + this.height / 2);
-                    gradient.addColorStop(0, '#95a5a6');
-                    gradient.addColorStop(1, '#7f8c8d');
+                    // Add drop shadow for depth
+                    ctx.fillStyle = 'rgba(0, 0, 0, 0.4)';
+                    ctx.fillRect(this.x - this.width / 2 + 4, this.y - this.height / 2 + 4, this.width, this.height);
+                    
+                    // Enhanced metallic gradient with more depth
+                    const gradient = ctx.createLinearGradient(
+                        this.x - this.width / 2, this.y - this.height / 2,
+                        this.x + this.width / 2, this.y + this.height / 2
+                    );
+                    gradient.addColorStop(0, '#bdc3c7');
+                    gradient.addColorStop(0.3, '#95a5a6');
+                    gradient.addColorStop(0.7, '#7f8c8d');
+                    gradient.addColorStop(1, '#636e72');
+                    
                     ctx.fillStyle = gradient;
-                    ctx.strokeStyle = '#bdc3c7';
                     ctx.fillRect(this.x - this.width / 2, this.y - this.height / 2, this.width, this.height);
+                    
+                    // Add metallic highlight on top and left edges
+                    ctx.strokeStyle = '#ecf0f1';
+                    ctx.lineWidth = 2;
+                    ctx.beginPath();
+                    ctx.moveTo(this.x - this.width / 2, this.y - this.height / 2);
+                    ctx.lineTo(this.x + this.width / 2, this.y - this.height / 2);
+                    ctx.moveTo(this.x - this.width / 2, this.y - this.height / 2);
+                    ctx.lineTo(this.x - this.width / 2, this.y + this.height / 2);
+                    ctx.stroke();
+                    
+                    // Add dark shadow on bottom and right edges
+                    ctx.strokeStyle = '#2d3436';
+                    ctx.beginPath();
+                    ctx.moveTo(this.x + this.width / 2, this.y - this.height / 2);
+                    ctx.lineTo(this.x + this.width / 2, this.y + this.height / 2);
+                    ctx.moveTo(this.x - this.width / 2, this.y + this.height / 2);
+                    ctx.lineTo(this.x + this.width / 2, this.y + this.height / 2);
+                    ctx.stroke();
+                    
+                    // Main border
+                    ctx.strokeStyle = '#636e72';
+                    ctx.lineWidth = 1;
                     ctx.strokeRect(this.x - this.width / 2, this.y - this.height / 2, this.width, this.height);
                 } else if (this.type === 'moving') {
-                    const glow = this.axis === 'horizontal' ? '#f39c12' : '#9b59b6';
-                    ctx.fillStyle = glow;
-                    ctx.strokeStyle = 'rgba(0,0,0,0.6)';
-                    ctx.shadowColor = glow;
-                    ctx.shadowBlur = 12;
+                    const glowColor = this.axis === 'horizontal' ? '#f39c12' : '#9b59b6';
+                    const darkerGlow = this.axis === 'horizontal' ? '#d68910' : '#7d3c98';
+                    const lighterGlow = this.axis === 'horizontal' ? '#f8c471' : '#bb8fce';
+                    
+                    // Add drop shadow with glow effect
+                    ctx.fillStyle = 'rgba(0, 0, 0, 0.3)';
+                    ctx.fillRect(this.x - this.width / 2 + 3, this.y - this.height / 2 + 3, this.width, this.height);
+                    
+                    // Create glowing gradient with depth
+                    const gradient = ctx.createLinearGradient(
+                        this.x - this.width / 2, this.y - this.height / 2,
+                        this.x + this.width / 2, this.y + this.height / 2
+                    );
+                    gradient.addColorStop(0, lighterGlow);
+                    gradient.addColorStop(0.5, glowColor);
+                    gradient.addColorStop(1, darkerGlow);
+                    
+                    // Apply main glow effect
+                    ctx.shadowColor = glowColor;
+                    ctx.shadowBlur = 15;
+                    ctx.fillStyle = gradient;
                     ctx.fillRect(this.x - this.width / 2, this.y - this.height / 2, this.width, this.height);
+                    
+                    // Add bright highlight on top edge
+                    ctx.shadowBlur = 5;
+                    ctx.strokeStyle = lighterGlow;
+                    ctx.lineWidth = 2;
+                    ctx.beginPath();
+                    ctx.moveTo(this.x - this.width / 2, this.y - this.height / 2);
+                    ctx.lineTo(this.x + this.width / 2, this.y - this.height / 2);
+                    ctx.stroke();
+                    
+                    // Main border with glow
+                    ctx.strokeStyle = darkerGlow;
+                    ctx.lineWidth = 1;
                     ctx.strokeRect(this.x - this.width / 2, this.y - this.height / 2, this.width, this.height);
+                    
+                    // Reset shadow
                     ctx.shadowBlur = 0;
                     ctx.shadowColor = 'transparent';
                 }
@@ -717,31 +1081,80 @@
                 const halfHeight = this.height / 2;
 
                 if (this.type === 'lava') {
-                    // Animated lava pit
+                    // Animated organic lava pool
                     const time = this.animationFrame * 0.1;
                     const bubbleOffset = Math.sin(time) * 3;
                     
-                    // Base lava color
-                    const gradient = ctx.createRadialGradient(centerX, centerY, 0, centerX, centerY, halfWidth);
+                    // Create irregular lava pool shape using a path
+                    ctx.beginPath();
+                    
+                    // Generate oval shape with slight irregularities
+                    const points = 16; // More points for smoother oval
+                    
+                    for (let i = 0; i <= points; i++) {
+                        const angle = (i / points) * Math.PI * 2;
+                        
+                        // Create elliptical shape using width and height
+                        const baseRadiusX = halfWidth;
+                        const baseRadiusY = halfHeight;
+                        
+                        // Add some randomness for natural variation (but consistent per pool)
+                        const seed = (this.x + this.y) * 0.001;
+                        const variation = 0.85 + 0.15 * Math.sin(seed * 7 + i * 1.5); // Slight variation 0.85-1.0
+                        
+                        // Calculate ellipse radius at this angle
+                        const radiusX = baseRadiusX * variation;
+                        const radiusY = baseRadiusY * variation;
+                        
+                        // Add gentle wobble animation for liquid effect
+                        const wobble = Math.sin(time * 1.5 + i * 0.4) * 1.5;
+                        
+                        const x = centerX + Math.cos(angle) * (radiusX + wobble);
+                        const y = centerY + Math.sin(angle) * (radiusY + wobble);
+                        
+                        if (i === 0) {
+                            ctx.moveTo(x, y);
+                        } else {
+                            // Use smooth curves for oval shape
+                            ctx.lineTo(x, y);
+                        }
+                    }
+                    ctx.closePath();
+                    
+                    // Base lava gradient
+                    const gradientRadius = Math.max(halfWidth, halfHeight);
+                    const gradient = ctx.createRadialGradient(centerX, centerY, 0, centerX, centerY, gradientRadius);
                     gradient.addColorStop(0, '#FF4500');
                     gradient.addColorStop(0.6, '#FF6347');
                     gradient.addColorStop(1, '#8B0000');
                     
                     ctx.fillStyle = gradient;
-                    ctx.fillRect(centerX - halfWidth, centerY - halfHeight, this.width, this.height);
-                    
-                    // Animated bubbles
-                    ctx.fillStyle = '#FFD700';
-                    ctx.beginPath();
-                    ctx.arc(centerX + bubbleOffset, centerY - bubbleOffset, 4, 0, Math.PI * 2);
-                    ctx.arc(centerX - bubbleOffset * 0.7, centerY + bubbleOffset * 0.5, 3, 0, Math.PI * 2);
                     ctx.fill();
                     
-                    // Glow effect
+                    // Add glow effect
                     ctx.shadowColor = '#FF4500';
                     ctx.shadowBlur = 15;
-                    ctx.fillStyle = 'rgba(255, 69, 0, 0.3)';
-                    ctx.fillRect(centerX - halfWidth, centerY - halfHeight, this.width, this.height);
+                    ctx.globalAlpha = 0.3;
+                    ctx.fill();
+                    ctx.globalAlpha = 1;
+                    ctx.shadowBlur = 0;
+                    
+                    // Animated bubbles (adjusted for organic shape)
+                    ctx.fillStyle = '#FFD700';
+                    ctx.beginPath();
+                    ctx.arc(centerX + bubbleOffset * 0.5, centerY - bubbleOffset * 0.3, 4, 0, Math.PI * 2);
+                    ctx.arc(centerX - bubbleOffset * 0.4, centerY + bubbleOffset * 0.6, 3, 0, Math.PI * 2);
+                    ctx.arc(centerX + bubbleOffset * 0.2, centerY + bubbleOffset * 0.2, 2, 0, Math.PI * 2);
+                    ctx.fill();
+                    
+                    // Debug: Show collision area outline when debug mode is enabled
+                    if (typeof showDebugInfo !== 'undefined' && showDebugInfo) {
+                        ctx.strokeStyle = '#00FF00';
+                        ctx.lineWidth = 2;
+                        ctx.globalAlpha = 0.5;
+                        ctx.stroke(); // Stroke the same organic path we created
+                        ctx.globalAlpha = 1;
+                    }
                     
                 } else if (this.type === 'teleporter') {
                     // Animated teleporter portal
@@ -868,24 +1281,64 @@
                     
                     ctx.globalAlpha = 1;
                 } else if (this.type === 'ice') {
-                    // Animated ice patch
+                    // Animated organic ice patch (translucent to show ground below)
                     const time = this.animationFrame * 0.05;
                     
-                    // Base ice color with gradient
-                    const iceGradient = ctx.createRadialGradient(centerX, centerY, 0, centerX, centerY, halfWidth);
+                    // Create irregular ice patch shape using a path
+                    ctx.beginPath();
+                    
+                    // Generate organic ice shape with multiple control points
+                    const points = 12; // More points for smoother ice shape
+                    
+                    for (let i = 0; i <= points; i++) {
+                        const angle = (i / points) * Math.PI * 2;
+                        
+                        // Create elliptical base with ice-like variation
+                        const baseRadiusX = halfWidth;
+                        const baseRadiusY = halfHeight;
+                        
+                        // Add crystalline variation for ice (more angular than lava)
+                        const seed = (this.x + this.y) * 0.001;
+                        const variation = 0.8 + 0.2 * Math.cos(seed * 9 + i * 1.8); // More angular variation
+                        
+                        // Calculate ellipse radius at this angle
+                        const radiusX = baseRadiusX * variation;
+                        const radiusY = baseRadiusY * variation;
+                        
+                        // Add very gentle animation for frozen effect
+                        const wobble = Math.sin(time * 0.8 + i * 0.6) * 0.8; // Much less wobble than lava
+                        
+                        const x = centerX + Math.cos(angle) * (radiusX + wobble);
+                        const y = centerY + Math.sin(angle) * (radiusY + wobble);
+                        
+                        if (i === 0) {
+                            ctx.moveTo(x, y);
+                        } else {
+                            ctx.lineTo(x, y);
+                        }
+                    }
+                    ctx.closePath();
+                    
+                    // Make ice translucent so ground shows through
+                    ctx.globalAlpha = 0.6;
+                    
+                    // Base ice gradient
+                    const gradientRadius = Math.max(halfWidth, halfHeight);
+                    const iceGradient = ctx.createRadialGradient(centerX, centerY, 0, centerX, centerY, gradientRadius);
                     iceGradient.addColorStop(0, '#E0F6FF');
                     iceGradient.addColorStop(0.6, '#B0E0E6');
                     iceGradient.addColorStop(1, '#87CEEB');
                     
                     ctx.fillStyle = iceGradient;
-                    ctx.fillRect(centerX - halfWidth, centerY - halfHeight, this.width, this.height);
+                    ctx.fill();
                     
-                    // Ice crystals/sparkles
+                    // Ice crystals/sparkles (more opaque than base ice)
+                    ctx.globalAlpha = 0.8;
                     ctx.fillStyle = '#FFFFFF';
                     const sparkleCount = 8;
                     for (let i = 0; i < sparkleCount; i++) {
                         const angle = (i / sparkleCount) * Math.PI * 2 + time;
-                        const radius = halfWidth * 0.6;
+                        const radius = Math.min(halfWidth, halfHeight) * 0.6;
                         const sparkleX = centerX + Math.cos(angle) * radius * (0.5 + 0.5 * Math.sin(time + i));
                         const sparkleY = centerY + Math.sin(angle) * radius * (0.5 + 0.5 * Math.cos(time + i));
                         const sparkleSize = 1 + Math.sin(time * 3 + i) * 0.5;
@@ -895,11 +1348,21 @@
                         ctx.fill();
                     }
                     
-                    // Frost effect around edges
+                    // Frost effect around edges (outline the organic shape)
+                    ctx.globalAlpha = 0.7;
                     ctx.strokeStyle = '#FFFFFF';
                     ctx.lineWidth = 1;
-                    ctx.globalAlpha = 0.6;
-                    ctx.strokeRect(centerX - halfWidth + 1, centerY - halfHeight + 1, this.width - 2, this.height - 2);
+                    ctx.stroke(); // Stroke the organic path we created
+                    
+                    // Debug: Show collision area outline when debug mode is enabled
+                    if (typeof showDebugInfo !== 'undefined' && showDebugInfo) {
+                        ctx.strokeStyle = '#00FFFF';
+                        ctx.lineWidth = 2;
+                        ctx.globalAlpha = 0.5;
+                        ctx.stroke();
+                    }
+                    
+                    // Reset alpha for other elements
                     ctx.globalAlpha = 1;
                 }
                 
@@ -908,10 +1371,77 @@
 
             // Check if a tank overlaps with this hazard
             overlapsWithTank(tank) {
+                if (this.type === 'lava') {
+                    // For lava, check if tank center is inside the organic shape
+                    return this.isPointInLavaShape(tank.x, tank.y);
+                } else if (this.type === 'ice') {
+                    // For ice, check if tank center is inside the organic shape
+                    return this.isPointInIceShape(tank.x, tank.y);
+                }
+                
+                // For other hazards, use rectangular collision
                 return tank.x + TANK_COLLISION_RADIUS > this.x - this.width / 2 &&
                        tank.x - TANK_COLLISION_RADIUS < this.x + this.width / 2 &&
                        tank.y + TANK_COLLISION_RADIUS > this.y - this.height / 2 &&
                        tank.y - TANK_COLLISION_RADIUS < this.y + this.height / 2;
+            }
+            
+            // Check if a point is inside the oval lava shape
+            isPointInLavaShape(x, y) {
+                if (this.type !== 'lava') return false;
+                
+                const centerX = this.x;
+                const centerY = this.y;
+                const halfWidth = this.width / 2;
+                const halfHeight = this.height / 2;
+                
+                // Calculate relative position from center
+                const dx = x - centerX;
+                const dy = y - centerY;
+                
+                // Use ellipse equation with slight variation for natural edges
+                const seed = (this.x + this.y) * 0.001;
+                const angle = Math.atan2(dy, dx);
+                
+                // Add the same variation as in the drawing
+                const variation = 0.85 + 0.15 * Math.sin(seed * 7 + angle * 8); // Match drawing variation
+                
+                // Ellipse equation: (x/a)² + (y/b)² <= 1
+                const normalizedX = dx / (halfWidth * variation);
+                const normalizedY = dy / (halfHeight * variation);
+                const ellipseValue = (normalizedX * normalizedX) + (normalizedY * normalizedY);
+                
+                // Point is inside if ellipse value is less than or equal to 1
+                return ellipseValue <= 1.0;
+            }
+            
+            // Check if a point is inside the organic ice shape
+            isPointInIceShape(x, y) {
+                if (this.type !== 'ice') return false;
+                
+                const centerX = this.x;
+                const centerY = this.y;
+                const halfWidth = this.width / 2;
+                const halfHeight = this.height / 2;
+                
+                // Calculate relative position from center
+                const dx = x - centerX;
+                const dy = y - centerY;
+                
+                // Use ellipse equation with crystalline variation for ice
+                const seed = (this.x + this.y) * 0.001;
+                const angle = Math.atan2(dy, dx);
+                
+                // Add the same variation as in the drawing (more angular for ice)
+                const variation = 0.8 + 0.2 * Math.cos(seed * 9 + angle * 6); // Match drawing variation
+                
+                // Ellipse equation: (x/a)² + (y/b)² <= 1
+                const normalizedX = dx / (halfWidth * variation);
+                const normalizedY = dy / (halfHeight * variation);
+                const ellipseValue = (normalizedX * normalizedX) + (normalizedY * normalizedY);
+                
+                // Point is inside if ellipse value is less than or equal to 1
+                return ellipseValue <= 1.0;
             }
 
             // Check if a bullet overlaps with this hazard
@@ -1057,11 +1587,19 @@
             }
         }
         
-        const player1 = new Tank(TANK_START_MARGIN, canvas.height / 2, '#2ecc71', '#27ae60');
-        player1.angle = 0;
+        let player1, player2;
 
-        const player2 = new Tank(canvas.width - TANK_START_MARGIN, canvas.height / 2, '#3498db', '#2980b9');
-        player2.angle = Math.PI;
+        function initializeTanks() {
+            player1 = new Tank(TANK_START_MARGIN, canvas.height / 2, '#e74c3c', '#c0392b');
+            player1.angle = 0;
+
+            if (gameMode === 'twoPlayer') {
+                player2 = new Tank(canvas.width - TANK_START_MARGIN, canvas.height / 2, '#3498db', '#2980b9');
+            } else if (gameMode === 'vsAI') {
+                player2 = new AITank(canvas.width - TANK_START_MARGIN, canvas.height / 2, '#3498db', '#2980b9');
+            }
+            player2.angle = Math.PI;
+        }
 
         function updateScoreboard() {
             player1ScoreDisplay.textContent = player1Score;
@@ -1241,20 +1779,59 @@
                                 if (!placed) break; // Stop if we can't place more ice blocks
                             }
                             
-                            // Place all ice blocks in the cluster
-                            for (const pos of icePositions) {
-                                const iceX = pos.col * barrierSize + barrierSize / 2;
-                                const iceY = pos.row * barrierSize + barrierSize / 2;
-                                const iceKey = `${pos.col},${pos.row}`;
-                                
-                                occupied.add(iceKey);
-                                hazards.push(new EnvironmentalHazard(iceX, iceY, barrierInteriorSize, barrierInteriorSize, 'ice'));
-                                hazards.push(new EnvironmentalHazard(canvas.width - iceX, iceY, barrierInteriorSize, barrierInteriorSize, 'ice'));
-                            }
+                            // Create single organic ice patch instead of multiple grid squares
+                            const iceSize = 50 + Math.random() * 50; // Random size between 50-100 pixels
+                            const iceWidth = iceSize + (Math.random() - 0.5) * 25; // Irregular width
+                            const iceHeight = iceSize + (Math.random() - 0.5) * 25; // Irregular height
+                            
+                            // Add some random offset from grid alignment
+                            const offsetX = (Math.random() - 0.5) * (barrierSize * 0.3);
+                            const offsetY = (Math.random() - 0.5) * (barrierSize * 0.3);
+                            const iceX = x + offsetX;
+                            const iceY = y + offsetY;
+                            
+                            // Ensure ice patches don't go outside canvas bounds
+                            const finalX = Math.max(iceWidth/2 + 10, Math.min(canvas.width/2 - iceWidth/2 - 10, iceX));
+                            const finalY = Math.max(iceHeight/2 + 10, Math.min(canvas.height - iceHeight/2 - 10, iceY));
+                            
+                            hazards.push(new EnvironmentalHazard(finalX, finalY, iceWidth, iceHeight, 'ice'));
+                            
+                            // Create mirrored ice patch on the other side
+                            const mirrorIceWidth = iceSize + (Math.random() - 0.5) * 25;
+                            const mirrorIceHeight = iceSize + (Math.random() - 0.5) * 25;
+                            const mirrorOffsetY = (Math.random() - 0.5) * (barrierSize * 0.3);
+                            const mirrorX = canvas.width - finalX;
+                            const mirrorY = y + mirrorOffsetY;
+                            const finalMirrorY = Math.max(mirrorIceHeight/2 + 10, Math.min(canvas.height - mirrorIceHeight/2 - 10, mirrorY));
+                            
+                            hazards.push(new EnvironmentalHazard(mirrorX, finalMirrorY, mirrorIceWidth, mirrorIceHeight, 'ice'));
                         } else {
-                            // Lava pit
-                            hazards.push(new EnvironmentalHazard(x, y, barrierInteriorSize, barrierInteriorSize, 'lava'));
-                            hazards.push(new EnvironmentalHazard(canvas.width - x, y, barrierInteriorSize, barrierInteriorSize, 'lava'));
+                            // Create larger irregular lava pool with random shape
+                            const lavaSize = 60 + Math.random() * 60; // Random size between 60-120 pixels (bigger than grid)
+                            const lavaWidth = lavaSize + (Math.random() - 0.5) * 30; // More irregular width
+                            const lavaHeight = lavaSize + (Math.random() - 0.5) * 30; // More irregular height
+                            
+                            // Add some random offset from grid alignment for more natural placement
+                            const offsetX = (Math.random() - 0.5) * (barrierSize * 0.3);
+                            const offsetY = (Math.random() - 0.5) * (barrierSize * 0.3);
+                            const lavaX = x + offsetX;
+                            const lavaY = y + offsetY;
+                            
+                            // Ensure lava pools don't go outside canvas bounds
+                            const finalX = Math.max(lavaWidth/2 + 10, Math.min(canvas.width/2 - lavaWidth/2 - 10, lavaX));
+                            const finalY = Math.max(lavaHeight/2 + 10, Math.min(canvas.height - lavaHeight/2 - 10, lavaY));
+                            
+                            hazards.push(new EnvironmentalHazard(finalX, finalY, lavaWidth, lavaHeight, 'lava'));
+                            
+                            // Create mirrored lava pool on the other side with slightly different shape
+                            const mirrorLavaWidth = lavaSize + (Math.random() - 0.5) * 20;
+                            const mirrorLavaHeight = lavaSize + (Math.random() - 0.5) * 20;
+                            const mirrorOffsetY = (Math.random() - 0.5) * (barrierSize * 0.3);
+                            const mirrorX = canvas.width - finalX;
+                            const mirrorY = y + mirrorOffsetY;
+                            const finalMirrorY = Math.max(mirrorLavaHeight/2 + 10, Math.min(canvas.height - mirrorLavaHeight/2 - 10, mirrorY));
+                            
+                            hazards.push(new EnvironmentalHazard(mirrorX, finalMirrorY, mirrorLavaWidth, mirrorLavaHeight, 'lava'));
                         }
                     }
                 }
@@ -1360,8 +1937,38 @@
             }
         }
         
-        document.addEventListener('keydown', (e) => { keys[e.code] = true; });
+        document.addEventListener('keydown', (e) => { 
+            keys[e.code] = true; 
+            
+            // Handle special keys
+            if (e.code === 'KeyR') {
+                restartGame();
+            } else if (e.code === 'Minus') {
+                showDebugInfo = !showDebugInfo;
+            }
+        });
         document.addEventListener('keyup', (e) => { keys[e.code] = false; });
+        
+        function restartGame() {
+            // Reset scores
+            player1Score = 0;
+            player2Score = 0;
+            
+            // Clear game objects
+            bullets.length = 0;
+            explosions.length = 0;
+            barriers.length = 0;
+            hazards.length = 0;
+            
+            // Reinitialize tanks
+            initializeTanks();
+            
+            // Regenerate map
+            generateBarriers();
+            
+            // Update display
+            updateScoreboard();
+        }
         
         function handleTankMovement(tank, forwardKey, backwardKey, leftKey, rightKey, otherTank) {
              if (tank.isHit) return;
@@ -1432,23 +2039,31 @@
         }
 
         function handleInput() {
+            // Player 1 controls (always active)
             handleTankMovement(player1, 'KeyW', 'KeyS', 'KeyA', 'KeyD', player2);
-            if (keys['KeyZ']) player1.fire();
+            if (keys['Space']) player1.fire();
            
-            handleTankMovement(player2, 'ArrowUp', 'ArrowDown', 'ArrowLeft', 'ArrowRight', player1);
-            if (keys['Slash']) player2.fire();
+            // Player 2 controls (only in two-player mode)
+            if (gameMode === 'twoPlayer') {
+                handleTankMovement(player2, 'ArrowUp', 'ArrowDown', 'ArrowLeft', 'ArrowRight', player1);
+                if (keys['Enter']) player2.fire();
+            }
         }
         
         function checkCollisions() {
             bulletsLoop: for (let i = bullets.length - 1; i >= 0; i--) {
                 const bullet = bullets[i];
                 
-                // Bullet-barrier collision
+                // Bullet-barrier collision (accounting for bullet radius)
                 for (let j = barriers.length - 1; j >= 0; j--) {
                     const barrier = barriers[j];
                     if (barrier.isDestroyed()) continue;
-                    if (bullet.x > barrier.x - barrier.width / 2 && bullet.x < barrier.x + barrier.width / 2 &&
-                        bullet.y > barrier.y - barrier.height / 2 && bullet.y < barrier.y + barrier.height / 2) {
+                    
+                    // Expand barrier bounds by bullet radius to prevent bullets slipping through gaps
+                    if (bullet.x + bullet.radius > barrier.x - barrier.width / 2 && 
+                        bullet.x - bullet.radius < barrier.x + barrier.width / 2 &&
+                        bullet.y + bullet.radius > barrier.y - barrier.height / 2 && 
+                        bullet.y - bullet.radius < barrier.y + barrier.height / 2) {
                         
                         if (barrier.type === 'breakable') {
                             const hadMoreThanOneHealth = barrier.health > 1;
@@ -1564,6 +2179,7 @@
             drawGrid();
             handleInput();
 
+            // Update barriers but don't draw them yet
             barriers.forEach(barrier => {
                 barrier.update(barriers); // Pass all barriers for collision detection
                 if (barrier.type === 'moving') {
@@ -1574,7 +2190,6 @@
                         destroyTank(player2, false);
                     }
                 }
-                barrier.draw();
             });
             
             // Reset ice state for both tanks before checking hazards
@@ -1642,6 +2257,11 @@
                 }
             });
             
+            // Update AI tank if in AI mode
+            if (gameMode === 'vsAI' && player2 instanceof AITank) {
+                player2.update(player1);
+            }
+            
             bullets.forEach(bullet => {
                 bullet.update();
                 bullet.draw();
@@ -1657,14 +2277,98 @@
                 }
             }
 
-            player1.draw();
-            player2.draw();
+            // Draw all tank tracks first (behind everything)
+            player1.drawTracks();
+            player2.drawTracks();
+            
+            // Draw tank bodies on top of tracks
+            player1.drawBody();
+            player2.drawBody();
+            
+            // Draw barriers last so they appear on top of everything
+            barriers.forEach(barrier => {
+                barrier.draw();
+            });
+            
+            // Draw debug info if enabled
+            if (showDebugInfo) {
+                drawDebugInfo();
+            }
+            
             requestAnimationFrame(gameLoop);
         }
+        
+        function drawDebugInfo() {
+            ctx.fillStyle = 'rgba(0, 0, 0, 0.7)';
+            ctx.fillRect(10, 10, 200, 150);
+            
+            ctx.fillStyle = 'white';
+            ctx.font = '12px Arial';
+            ctx.fillText('Debug Info (Press - to toggle)', 15, 25);
+            ctx.fillText(`Game Mode: ${gameMode}`, 15, 45);
+            ctx.fillText(`P1: ${Math.round(player1.x)}, ${Math.round(player1.y)}`, 15, 65);
+            ctx.fillText(`P2: ${Math.round(player2.x)}, ${Math.round(player2.y)}`, 15, 85);
+            ctx.fillText(`Bullets: ${bullets.length}`, 15, 105);
+            ctx.fillText(`Barriers: ${barriers.length}`, 15, 125);
+            ctx.fillText(`Hazards: ${hazards.length}`, 15, 145);
+            
+            if (gameMode === 'vsAI' && player2 instanceof AITank) {
+                ctx.fillText(`AI Target Distance: ${Math.round(Math.hypot(player2.target?.x - player2.x || 0, player2.target?.y - player2.y || 0))}`, 15, 165);
+            }
+        }
+        
+        let showDebugInfo = false;
 
-        generateBarriers();
-        updateScoreboard();
-        gameLoop();
+        // Game mode selection event handlers
+        document.getElementById('twoPlayerBtn').addEventListener('click', function() {
+            gameMode = 'twoPlayer';
+            startGame();
+        });
+
+        document.getElementById('vsAIBtn').addEventListener('click', function() {
+            gameMode = 'vsAI';
+            startGame();
+        });
+
+        function startGame() {
+            // Hide mode selection and show game
+            document.getElementById('gameModeSelector').style.display = 'none';
+            document.getElementById('scoreboard').style.display = 'block';
+            document.getElementById('gameCanvas').style.display = 'block';
+            document.getElementById('controls').style.display = 'block';
+            
+            // Update controls text based on game mode
+            updateControlsText();
+            
+            // Initialize the game
+            initializeTanks();
+            generateBarriers();
+            updateScoreboard();
+            gameRunning = true;
+            gameLoop();
+        }
+
+        function updateControlsText() {
+            const controls = document.getElementById('controls');
+            if (gameMode === 'twoPlayer') {
+                controls.innerHTML = `
+                    <div><strong>Player 1 (Red):</strong> WASD to move, Space to shoot</div>
+                    <div><strong>Player 2 (Blue):</strong> Arrow keys to move, Enter to shoot</div>
+                    <div>Press 'R' to restart, '-' for debug info</div>
+                `;
+            } else if (gameMode === 'vsAI') {
+                controls.innerHTML = `
+                    <div><strong>Player (Red):</strong> WASD to move, Space to shoot</div>
+                    <div><strong>AI (Blue):</strong> Controlled by computer</div>
+                    <div>Press 'R' to restart, '-' for debug info</div>
+                `;
+            }
+        }
+
+        // Don't start the game immediately - wait for mode selection
+        // generateBarriers();
+        // updateScoreboard();
+        // gameLoop();
     </script>
 </body>
 </html>
