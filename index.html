@@ -303,6 +303,7 @@
         const bullets = [];
         const explosions = [];
         const barriers = []; // Array to store barriers
+        const hazards = []; // Array to store environmental hazards
         let player1Score = 0;
         let player2Score = 0;
 
@@ -324,6 +325,19 @@
         };
         const MOVING_BARRIER_SPEED = 1.3;
         const MOVING_BARRIER_RANGE_MULTIPLIER = 2.5;
+        
+        // Environmental hazard constants
+        const HAZARD_SPAWN_CHANCE = 0.04;
+        const HAZARD_TYPE_CHANCES = {
+            lava: 0.3,
+            teleporter: 0.25,
+            conveyor: 0.25,
+            ice: 0.2
+        };
+        const LAVA_DAMAGE_RATE = 1000; // Damage every 1000ms
+        const CONVEYOR_FORCE = 1.5;
+        const ICE_FRICTION = 0.95; // Reduced friction on ice
+        const ICE_SLIDE_FORCE = 0.8; // Momentum preservation on ice
 
         // Use the combined width for collision radius (main body + track width)
         const TANK_COLLISION_RADIUS = TANK_SIZE / 2; 
@@ -339,10 +353,17 @@
                 this.angle = 0; // Angle for the entire tank
                 this.lastShotTime = 0;
                 this.isHit = false;
+                this.trackHistory = []; // Store track positions for drawing trails
+                this.lastTrackPosition = { x: x, y: y, angle: 0 };
+                this.trackTimer = 0;
             }
 
             draw() {
                 if (this.isHit) return;
+                
+                // Draw tracks first (behind the tank)
+                this.drawTracks();
+                
                 ctx.save();
                 ctx.translate(this.x, this.y);
                 ctx.rotate(this.angle);
@@ -376,6 +397,88 @@
             
             rotate(direction) {
                  this.angle += TURN_SPEED * direction;
+            }
+            
+            updateTracks() {
+                // Only add tracks when tank is moving
+                const distance = Math.hypot(this.x - this.lastTrackPosition.x, this.y - this.lastTrackPosition.y);
+                
+                if (distance > 8) { // Add track every 8 pixels of movement
+                    this.trackHistory.push({
+                        x: this.lastTrackPosition.x,
+                        y: this.lastTrackPosition.y,
+                        angle: this.lastTrackPosition.angle,
+                        life: 180 // Track fades over 3 seconds at 60fps
+                    });
+                    
+                    this.lastTrackPosition = { x: this.x, y: this.y, angle: this.angle };
+                    
+                    // Limit track history to prevent memory issues
+                    if (this.trackHistory.length > 50) {
+                        this.trackHistory.shift();
+                    }
+                }
+                
+                // Update track lifespans and remove old tracks
+                for (let i = this.trackHistory.length - 1; i >= 0; i--) {
+                    this.trackHistory[i].life--;
+                    if (this.trackHistory[i].life <= 0) {
+                        this.trackHistory.splice(i, 1);
+                    }
+                }
+            }
+            
+            drawTracks() {
+                // Draw tracks before drawing the tank
+                ctx.save();
+                for (let i = 0; i < this.trackHistory.length; i++) {
+                    const track = this.trackHistory[i];
+                    const alpha = Math.max(0, track.life / 180) * 0.3; // Fade from 30% to 0% opacity
+                    
+                    if (alpha > 0) {
+                        ctx.save();
+                        ctx.translate(track.x, track.y);
+                        ctx.rotate(track.angle);
+                        ctx.globalAlpha = alpha;
+                        
+                        // Draw subtle track marks (two parallel lines for treads)
+                        ctx.strokeStyle = '#2a2a2a';
+                        ctx.lineWidth = 3;
+                        ctx.lineCap = 'round';
+                        
+                        // Left track
+                        ctx.beginPath();
+                        ctx.moveTo(-this.size / 3, -this.size / 2);
+                        ctx.lineTo(-this.size / 3, this.size / 2);
+                        ctx.stroke();
+                        
+                        // Right track
+                        ctx.beginPath();
+                        ctx.moveTo(this.size / 3, -this.size / 2);
+                        ctx.lineTo(this.size / 3, this.size / 2);
+                        ctx.stroke();
+                        
+                        // Add small tread marks
+                        ctx.strokeStyle = '#1a1a1a';
+                        ctx.lineWidth = 1;
+                        for (let j = -this.size / 2; j <= this.size / 2; j += 4) {
+                            // Left tread marks
+                            ctx.beginPath();
+                            ctx.moveTo(-this.size / 3 - 2, j);
+                            ctx.lineTo(-this.size / 3 + 2, j);
+                            ctx.stroke();
+                            
+                            // Right tread marks
+                            ctx.beginPath();
+                            ctx.moveTo(this.size / 3 - 2, j);
+                            ctx.lineTo(this.size / 3 + 2, j);
+                            ctx.stroke();
+                        }
+                        
+                        ctx.restore();
+                    }
+                }
+                ctx.restore();
             }
             
             fire() {
@@ -497,10 +600,43 @@
                 return this.type === 'breakable' && this.health <= 0;
             }
 
-            update() {
+            update(allBarriers = []) {
                 if (this.type !== 'moving' || this.isDestroyed() || this.direction === 0 || this.speed <= 0) return;
+                
+                // Calculate next position
+                let nextX = this.x;
+                let nextY = this.y;
+                
                 if (this.axis === 'horizontal') {
-                    this.x += this.speed * this.direction;
+                    nextX += this.speed * this.direction;
+                } else {
+                    nextY += this.speed * this.direction;
+                }
+                
+                // Check for collisions with other barriers
+                let collision = false;
+                for (const otherBarrier of allBarriers) {
+                    if (otherBarrier === this || (otherBarrier.isDestroyed && otherBarrier.isDestroyed())) continue;
+                    
+                    // Check if next position would overlap with another barrier
+                    if (nextX + this.width / 2 > otherBarrier.x - otherBarrier.width / 2 &&
+                        nextX - this.width / 2 < otherBarrier.x + otherBarrier.width / 2 &&
+                        nextY + this.height / 2 > otherBarrier.y - otherBarrier.height / 2 &&
+                        nextY - this.height / 2 < otherBarrier.y + otherBarrier.height / 2) {
+                        collision = true;
+                        break;
+                    }
+                }
+                
+                if (collision) {
+                    // Bounce back - reverse direction
+                    this.direction *= -1;
+                    return; // Don't move this frame
+                }
+                
+                // Apply movement if no collision
+                if (this.axis === 'horizontal') {
+                    this.x = nextX;
                     const displacement = this.x - this.originX;
                     if (Math.abs(displacement) >= this.range) {
                         this.direction *= -1;
@@ -517,7 +653,7 @@
                         this.direction = -1;
                     }
                 } else {
-                    this.y += this.speed * this.direction;
+                    this.y = nextY;
                     const displacement = this.y - this.originY;
                     if (Math.abs(displacement) >= this.range) {
                         this.direction *= -1;
@@ -534,6 +670,256 @@
                         this.direction = -1;
                     }
                 }
+            }
+        }
+
+        // Environmental Hazard Classes
+        class EnvironmentalHazard {
+            constructor(x, y, width, height, type, options = {}) {
+                this.x = x;
+                this.y = y;
+                this.width = width;
+                this.height = height;
+                this.type = type;
+                this.active = true;
+                this.animationFrame = 0;
+                
+                // Type-specific properties
+                if (type === 'lava') {
+                    this.lastDamageTime = new Map(); // Track damage timing per tank
+                } else if (type === 'teleporter') {
+                    this.partner = options.partner || null;
+                    this.cooldown = 0;
+                    this.id = options.id || Math.random();
+                } else if (type === 'conveyor') {
+                    this.direction = options.direction || 0; // 0=right, 1=down, 2=left, 3=up
+                    this.force = options.force || CONVEYOR_FORCE;
+                } else if (type === 'ice') {
+                    this.tanksOnIce = new Map(); // Track tanks currently on ice
+                }
+            }
+
+            update() {
+                this.animationFrame++;
+                
+                if (this.type === 'teleporter' && this.cooldown > 0) {
+                    this.cooldown--;
+                }
+            }
+
+            draw() {
+                if (!this.active) return;
+                
+                ctx.save();
+                const centerX = this.x;
+                const centerY = this.y;
+                const halfWidth = this.width / 2;
+                const halfHeight = this.height / 2;
+
+                if (this.type === 'lava') {
+                    // Animated lava pit
+                    const time = this.animationFrame * 0.1;
+                    const bubbleOffset = Math.sin(time) * 3;
+                    
+                    // Base lava color
+                    const gradient = ctx.createRadialGradient(centerX, centerY, 0, centerX, centerY, halfWidth);
+                    gradient.addColorStop(0, '#FF4500');
+                    gradient.addColorStop(0.6, '#FF6347');
+                    gradient.addColorStop(1, '#8B0000');
+                    
+                    ctx.fillStyle = gradient;
+                    ctx.fillRect(centerX - halfWidth, centerY - halfHeight, this.width, this.height);
+                    
+                    // Animated bubbles
+                    ctx.fillStyle = '#FFD700';
+                    ctx.beginPath();
+                    ctx.arc(centerX + bubbleOffset, centerY - bubbleOffset, 4, 0, Math.PI * 2);
+                    ctx.arc(centerX - bubbleOffset * 0.7, centerY + bubbleOffset * 0.5, 3, 0, Math.PI * 2);
+                    ctx.fill();
+                    
+                    // Glow effect
+                    ctx.shadowColor = '#FF4500';
+                    ctx.shadowBlur = 15;
+                    ctx.fillStyle = 'rgba(255, 69, 0, 0.3)';
+                    ctx.fillRect(centerX - halfWidth, centerY - halfHeight, this.width, this.height);
+                    
+                } else if (this.type === 'teleporter') {
+                    // Animated teleporter portal
+                    const time = this.animationFrame * 0.08;
+                    const pulseSize = 5 + Math.sin(time) * 3;
+                    const isOnCooldown = this.cooldown > 0;
+                    
+                    // Portal base
+                    const portalGradient = ctx.createRadialGradient(centerX, centerY, 0, centerX, centerY, halfWidth);
+                    if (isOnCooldown) {
+                        portalGradient.addColorStop(0, '#666666');
+                        portalGradient.addColorStop(1, '#333333');
+                    } else {
+                        portalGradient.addColorStop(0, '#00FFFF');
+                        portalGradient.addColorStop(0.5, '#0080FF');
+                        portalGradient.addColorStop(1, '#000080');
+                    }
+                    
+                    ctx.fillStyle = portalGradient;
+                    ctx.fillRect(centerX - halfWidth, centerY - halfHeight, this.width, this.height);
+                    
+                    // Animated portal ring
+                    if (!isOnCooldown) {
+                        ctx.strokeStyle = '#00FFFF';
+                        ctx.lineWidth = 3;
+                        ctx.shadowColor = '#00FFFF';
+                        ctx.shadowBlur = 10;
+                        ctx.beginPath();
+                        ctx.arc(centerX, centerY, halfWidth - pulseSize, 0, Math.PI * 2);
+                        ctx.stroke();
+                    }
+                    
+                } else if (this.type === 'conveyor') {
+                    // Conveyor belt with subtle moving texture
+                    const time = this.animationFrame * 0.03;
+                    
+                    // Base conveyor belt color with gradient
+                    const beltGradient = ctx.createLinearGradient(centerX - halfWidth, centerY - halfHeight, centerX + halfWidth, centerY + halfHeight);
+                    beltGradient.addColorStop(0, '#5a5a5a');
+                    beltGradient.addColorStop(0.5, '#696969');
+                    beltGradient.addColorStop(1, '#4a4a4a');
+                    ctx.fillStyle = beltGradient;
+                    ctx.fillRect(centerX - halfWidth, centerY - halfHeight, this.width, this.height);
+                    
+                    // Belt edges/rails
+                    ctx.strokeStyle = '#333333';
+                    ctx.lineWidth = 2;
+                    ctx.strokeRect(centerX - halfWidth, centerY - halfHeight, this.width, this.height);
+                    
+                    // Moving belt texture pattern
+                    ctx.strokeStyle = '#808080';
+                    ctx.lineWidth = 1;
+                    ctx.globalAlpha = 0.4;
+                    
+                    const patternSpacing = 8;
+                    const offset = (time * 10) % patternSpacing;
+                    
+                    if (this.direction === 0 || this.direction === 2) { // Horizontal
+                        // Moving horizontal lines to simulate belt texture
+                        for (let x = offset - patternSpacing; x < this.width + patternSpacing; x += patternSpacing) {
+                            const lineX = centerX - halfWidth + x;
+                            if (lineX >= centerX - halfWidth + 2 && lineX <= centerX + halfWidth - 2) {
+                                ctx.beginPath();
+                                ctx.moveTo(lineX, centerY - halfHeight + 2);
+                                ctx.lineTo(lineX, centerY + halfHeight - 2);
+                                ctx.stroke();
+                            }
+                        }
+                        
+                        // Direction indicator - subtle chevron pattern
+                        ctx.globalAlpha = 0.6;
+                        ctx.strokeStyle = this.direction === 0 ? '#90EE90' : '#FFB6C1';
+                        ctx.lineWidth = 2;
+                        const chevronY = centerY;
+                        const chevronSpacing = 20;
+                        const chevronOffset = (time * 8) % chevronSpacing;
+                        
+                        for (let x = chevronOffset - chevronSpacing; x < this.width + chevronSpacing; x += chevronSpacing) {
+                            const chevronX = centerX - halfWidth + x;
+                            const dir = this.direction === 0 ? 1 : -1;
+                            
+                            if (chevronX >= centerX - halfWidth + 8 && chevronX <= centerX + halfWidth - 8) {
+                                ctx.beginPath();
+                                ctx.moveTo(chevronX - 4 * dir, chevronY - 3);
+                                ctx.lineTo(chevronX + 2 * dir, chevronY);
+                                ctx.lineTo(chevronX - 4 * dir, chevronY + 3);
+                                ctx.stroke();
+                            }
+                        }
+                        
+                    } else { // Vertical
+                        // Moving vertical lines to simulate belt texture
+                        for (let y = offset - patternSpacing; y < this.height + patternSpacing; y += patternSpacing) {
+                            const lineY = centerY - halfHeight + y;
+                            if (lineY >= centerY - halfHeight + 2 && lineY <= centerY + halfHeight - 2) {
+                                ctx.beginPath();
+                                ctx.moveTo(centerX - halfWidth + 2, lineY);
+                                ctx.lineTo(centerX + halfWidth - 2, lineY);
+                                ctx.stroke();
+                            }
+                        }
+                        
+                        // Direction indicator - subtle chevron pattern
+                        ctx.globalAlpha = 0.6;
+                        ctx.strokeStyle = this.direction === 1 ? '#90EE90' : '#FFB6C1';
+                        ctx.lineWidth = 2;
+                        const chevronX = centerX;
+                        const chevronSpacing = 20;
+                        const chevronOffset = (time * 8) % chevronSpacing;
+                        
+                        for (let y = chevronOffset - chevronSpacing; y < this.height + chevronSpacing; y += chevronSpacing) {
+                            const chevronY = centerY - halfHeight + y;
+                            const dir = this.direction === 1 ? 1 : -1;
+                            
+                            if (chevronY >= centerY - halfHeight + 8 && chevronY <= centerY + halfHeight - 8) {
+                                ctx.beginPath();
+                                ctx.moveTo(chevronX - 3, chevronY - 4 * dir);
+                                ctx.lineTo(chevronX, chevronY + 2 * dir);
+                                ctx.lineTo(chevronX + 3, chevronY - 4 * dir);
+                                ctx.stroke();
+                            }
+                        }
+                    }
+                    
+                    ctx.globalAlpha = 1;
+                } else if (this.type === 'ice') {
+                    // Animated ice patch
+                    const time = this.animationFrame * 0.05;
+                    
+                    // Base ice color with gradient
+                    const iceGradient = ctx.createRadialGradient(centerX, centerY, 0, centerX, centerY, halfWidth);
+                    iceGradient.addColorStop(0, '#E0F6FF');
+                    iceGradient.addColorStop(0.6, '#B0E0E6');
+                    iceGradient.addColorStop(1, '#87CEEB');
+                    
+                    ctx.fillStyle = iceGradient;
+                    ctx.fillRect(centerX - halfWidth, centerY - halfHeight, this.width, this.height);
+                    
+                    // Ice crystals/sparkles
+                    ctx.fillStyle = '#FFFFFF';
+                    const sparkleCount = 8;
+                    for (let i = 0; i < sparkleCount; i++) {
+                        const angle = (i / sparkleCount) * Math.PI * 2 + time;
+                        const radius = halfWidth * 0.6;
+                        const sparkleX = centerX + Math.cos(angle) * radius * (0.5 + 0.5 * Math.sin(time + i));
+                        const sparkleY = centerY + Math.sin(angle) * radius * (0.5 + 0.5 * Math.cos(time + i));
+                        const sparkleSize = 1 + Math.sin(time * 3 + i) * 0.5;
+                        
+                        ctx.beginPath();
+                        ctx.arc(sparkleX, sparkleY, sparkleSize, 0, Math.PI * 2);
+                        ctx.fill();
+                    }
+                    
+                    // Frost effect around edges
+                    ctx.strokeStyle = '#FFFFFF';
+                    ctx.lineWidth = 1;
+                    ctx.globalAlpha = 0.6;
+                    ctx.strokeRect(centerX - halfWidth + 1, centerY - halfHeight + 1, this.width - 2, this.height - 2);
+                    ctx.globalAlpha = 1;
+                }
+                
+                ctx.restore();
+            }
+
+            // Check if a tank overlaps with this hazard
+            overlapsWithTank(tank) {
+                return tank.x + TANK_COLLISION_RADIUS > this.x - this.width / 2 &&
+                       tank.x - TANK_COLLISION_RADIUS < this.x + this.width / 2 &&
+                       tank.y + TANK_COLLISION_RADIUS > this.y - this.height / 2 &&
+                       tank.y - TANK_COLLISION_RADIUS < this.y + this.height / 2;
+            }
+
+            // Check if a bullet overlaps with this hazard
+            overlapsWithBullet(bullet) {
+                return bullet.x > this.x - this.width / 2 &&
+                       bullet.x < this.x + this.width / 2 &&
+                       bullet.y > this.y - this.height / 2 &&
+                       bullet.y < this.y + this.height / 2;
             }
         }
 
@@ -622,6 +1008,55 @@
             }
         }
         
+        class TeleportEffect {
+            constructor(x, y) {
+                this.x = x;
+                this.y = y;
+                this.radius = 5;
+                this.maxRadius = TANK_SIZE;
+                this.lifespan = 30;
+                this.frame = 0;
+            }
+
+            update() {
+                this.frame++;
+                this.radius = (this.frame / this.lifespan) * this.maxRadius;
+            }
+
+            draw() {
+                if (this.frame > this.lifespan) return;
+                const alpha = 1 - (this.frame / this.lifespan);
+                ctx.save();
+                ctx.translate(this.x, this.y);
+                
+                // Teleport ring effect
+                ctx.strokeStyle = `rgba(0, 255, 255, ${alpha})`;
+                ctx.lineWidth = 3;
+                ctx.shadowColor = '#00FFFF';
+                ctx.shadowBlur = 15 * alpha;
+                ctx.beginPath();
+                ctx.arc(0, 0, this.radius, 0, Math.PI * 2);
+                ctx.stroke();
+                
+                // Inner sparkles
+                ctx.fillStyle = `rgba(255, 255, 255, ${alpha * 0.8})`;
+                for (let i = 0; i < 8; i++) {
+                    const angle = (i / 8) * Math.PI * 2 + this.frame * 0.2;
+                    const x = Math.cos(angle) * this.radius * 0.7;
+                    const y = Math.sin(angle) * this.radius * 0.7;
+                    ctx.beginPath();
+                    ctx.arc(x, y, 2, 0, Math.PI * 2);
+                    ctx.fill();
+                }
+                
+                ctx.restore();
+            }
+
+            isFinished() {
+                return this.frame > this.lifespan;
+            }
+        }
+        
         const player1 = new Tank(TANK_START_MARGIN, canvas.height / 2, '#2ecc71', '#27ae60');
         player1.angle = 0;
 
@@ -656,6 +1091,7 @@
         
         function generateBarriers() {
             barriers.length = 0;
+            hazards.length = 0;
             const barrierSize = BARRIER_SIZE; // Grid cell size for placement
             // Remove padding - barriers now fill the entire grid square
             const barrierInteriorSize = barrierSize; // Full size instead of padded size
@@ -720,6 +1156,109 @@
                     }
                 }
             }
+            
+            // Generate environmental hazards
+            const teleporterPairs = [];
+            for (let row = 0; row < gridRows; row++) {
+                for (let col = 0; col < gridCols; col++) {
+                    const key = `${col},${row}`;
+                    if (occupied.has(key) || col < safeZoneCols) continue;
+
+                    if (Math.random() < HAZARD_SPAWN_CHANCE) {
+                        const typeRoll = Math.random();
+                        let hazardType = 'lava';
+                        
+                        if (typeRoll < HAZARD_TYPE_CHANCES.lava) {
+                            hazardType = 'lava';
+                        } else if (typeRoll < HAZARD_TYPE_CHANCES.lava + HAZARD_TYPE_CHANCES.teleporter) {
+                            hazardType = 'teleporter';
+                        } else if (typeRoll < HAZARD_TYPE_CHANCES.lava + HAZARD_TYPE_CHANCES.teleporter + HAZARD_TYPE_CHANCES.conveyor) {
+                            hazardType = 'conveyor';
+                        } else {
+                            hazardType = 'ice';
+                        }
+                        
+                        const x = col * barrierSize + barrierSize / 2;
+                        const y = row * barrierSize + barrierSize / 2;
+                        
+                        occupied.add(key);
+                        
+                        if (hazardType === 'teleporter') {
+                            // Create teleporter pairs
+                            const teleporterId = Math.random();
+                            const teleporter1 = new EnvironmentalHazard(x, y, barrierInteriorSize, barrierInteriorSize, 'teleporter', { id: teleporterId });
+                            const teleporter2 = new EnvironmentalHazard(canvas.width - x, y, barrierInteriorSize, barrierInteriorSize, 'teleporter', { id: teleporterId });
+                            
+                            teleporter1.partner = teleporter2;
+                            teleporter2.partner = teleporter1;
+                            
+                            hazards.push(teleporter1, teleporter2);
+                        } else if (hazardType === 'conveyor') {
+                            const direction = Math.floor(Math.random() * 4); // 0=right, 1=down, 2=left, 3=up
+                            hazards.push(new EnvironmentalHazard(x, y, barrierInteriorSize, barrierInteriorSize, 'conveyor', { direction }));
+                            hazards.push(new EnvironmentalHazard(canvas.width - x, y, barrierInteriorSize, barrierInteriorSize, 'conveyor', { direction: (direction + 2) % 4 })); // Mirror direction
+                        } else if (hazardType === 'ice') {
+                            // Ice patches - create clusters of 2-4 adjacent ice blocks
+                            const clusterSize = Math.floor(Math.random() * 3) + 2; // 2-4 blocks
+                            const icePositions = [{ col, row }]; // Start with current position
+                            
+                            // Try to add adjacent ice blocks to create a cluster
+                            for (let i = 1; i < clusterSize; i++) {
+                                const directions = [
+                                    { dc: 1, dr: 0 },  // Right
+                                    { dc: 0, dr: 1 },  // Down
+                                    { dc: -1, dr: 0 }, // Left
+                                    { dc: 0, dr: -1 }  // Up
+                                ];
+                                
+                                // Shuffle directions for random cluster shapes
+                                for (let j = directions.length - 1; j > 0; j--) {
+                                    const k = Math.floor(Math.random() * (j + 1));
+                                    [directions[j], directions[k]] = [directions[k], directions[j]];
+                                }
+                                
+                                let placed = false;
+                                for (const dir of directions) {
+                                    // Try to place adjacent to an existing ice block in the cluster
+                                    for (const pos of icePositions) {
+                                        const newCol = pos.col + dir.dc;
+                                        const newRow = pos.row + dir.dr;
+                                        const newKey = `${newCol},${newRow}`;
+                                        
+                                        // Check if position is valid and not occupied
+                                        if (newCol >= safeZoneCols && newCol < gridCols && 
+                                            newRow >= 0 && newRow < gridRows && 
+                                            !occupied.has(newKey) &&
+                                            !icePositions.some(p => p.col === newCol && p.row === newRow)) {
+                                            
+                                            icePositions.push({ col: newCol, row: newRow });
+                                            placed = true;
+                                            break;
+                                        }
+                                    }
+                                    if (placed) break;
+                                }
+                                if (!placed) break; // Stop if we can't place more ice blocks
+                            }
+                            
+                            // Place all ice blocks in the cluster
+                            for (const pos of icePositions) {
+                                const iceX = pos.col * barrierSize + barrierSize / 2;
+                                const iceY = pos.row * barrierSize + barrierSize / 2;
+                                const iceKey = `${pos.col},${pos.row}`;
+                                
+                                occupied.add(iceKey);
+                                hazards.push(new EnvironmentalHazard(iceX, iceY, barrierInteriorSize, barrierInteriorSize, 'ice'));
+                                hazards.push(new EnvironmentalHazard(canvas.width - iceX, iceY, barrierInteriorSize, barrierInteriorSize, 'ice'));
+                            }
+                        } else {
+                            // Lava pit
+                            hazards.push(new EnvironmentalHazard(x, y, barrierInteriorSize, barrierInteriorSize, 'lava'));
+                            hazards.push(new EnvironmentalHazard(canvas.width - x, y, barrierInteriorSize, barrierInteriorSize, 'lava'));
+                        }
+                    }
+                }
+            }
         }
 
         function destroyTank(tank, isPlayer1Tank) {
@@ -743,6 +1282,82 @@
                    tank.x - TANK_COLLISION_RADIUS < barrier.x + barrier.width / 2 &&
                    tank.y + TANK_COLLISION_RADIUS > barrier.y - barrier.height / 2 &&
                    tank.y - TANK_COLLISION_RADIUS < barrier.y + barrier.height / 2;
+        }
+        
+        function handleTankHazardInteraction(tank, hazard, isPlayer1) {
+            const currentTime = Date.now();
+            
+            if (hazard.type === 'lava') {
+                // Damage over time for lava
+                const lastDamageTime = hazard.lastDamageTime.get(tank) || 0;
+                if (currentTime - lastDamageTime > LAVA_DAMAGE_RATE) {
+                    hazard.lastDamageTime.set(tank, currentTime);
+                    destroyTank(tank, isPlayer1);
+                }
+            } else if (hazard.type === 'teleporter' && hazard.partner && hazard.cooldown === 0) {
+                // Teleport to partner location
+                tank.x = hazard.partner.x;
+                tank.y = hazard.partner.y;
+                
+                // Set cooldown for both teleporters
+                hazard.cooldown = 60; // 1 second at 60fps
+                hazard.partner.cooldown = 60;
+                
+                // Add teleport effect
+                explosions.push(new TeleportEffect(hazard.x, hazard.y));
+                explosions.push(new TeleportEffect(hazard.partner.x, hazard.partner.y));
+            } else if (hazard.type === 'conveyor') {
+                // Apply conveyor force to tank movement
+                const forceX = hazard.direction === 0 ? hazard.force : hazard.direction === 2 ? -hazard.force : 0;
+                const forceY = hazard.direction === 1 ? hazard.force : hazard.direction === 3 ? -hazard.force : 0;
+                
+                // Apply force but respect boundaries
+                const newX = Math.max(TANK_COLLISION_RADIUS, Math.min(canvas.width - TANK_COLLISION_RADIUS, tank.x + forceX));
+                const newY = Math.max(TANK_COLLISION_RADIUS, Math.min(canvas.height - TANK_COLLISION_RADIUS, tank.y + forceY));
+                
+                // Check for collisions before applying force
+                let collision = false;
+                const otherTank = isPlayer1 ? player2 : player1;
+                
+                if (Math.hypot(newX - otherTank.x, newY - otherTank.y) < (TANK_COLLISION_RADIUS * 2)) {
+                    collision = true;
+                }
+                
+                // Check barrier collisions
+                for (const barrier of barriers) {
+                    if (barrier.isDestroyed && barrier.isDestroyed()) continue;
+                    if (newX + TANK_COLLISION_RADIUS > barrier.x - barrier.width/2 && 
+                        newX - TANK_COLLISION_RADIUS < barrier.x + barrier.width/2 &&
+                        newY + TANK_COLLISION_RADIUS > barrier.y - barrier.height/2 && 
+                        newY - TANK_COLLISION_RADIUS < barrier.y + barrier.height/2) {
+                        collision = true;
+                        break;
+                    }
+                }
+                
+                if (!collision) {
+                    tank.x = newX;
+                    tank.y = newY;
+                }
+            } else if (hazard.type === 'ice') {
+                // Ice patch - make tank slippery and preserve momentum
+                if (!hazard.tanksOnIce.has(tank)) {
+                    hazard.tanksOnIce.set(tank, { 
+                        velocityX: 0, 
+                        velocityY: 0,
+                        onIceTime: 0
+                    });
+                }
+                
+                const iceData = hazard.tanksOnIce.get(tank);
+                iceData.onIceTime++;
+                
+                // Store tank's current momentum for sliding effect
+                // This will be used in tank movement to create sliding
+                tank.iceVelocityX = iceData.velocityX;
+                tank.iceVelocityY = iceData.velocityY;
+                tank.isOnIce = true;
+            }
         }
         
         document.addEventListener('keydown', (e) => { keys[e.code] = true; });
@@ -787,12 +1402,33 @@
                 if (!collision) {
                     tank.x = nextX;
                     tank.y = nextY;
+                    
+                    // Update ice velocity when moving on ice
+                    if (tank.isOnIce) {
+                        tank.iceVelocityX += moveX * ICE_SLIDE_FORCE;
+                        tank.iceVelocityY += moveY * ICE_SLIDE_FORCE;
+                        
+                        // Apply friction to ice velocity
+                        tank.iceVelocityX *= ICE_FRICTION;
+                        tank.iceVelocityY *= ICE_FRICTION;
+                        
+                        // Cap maximum ice velocity
+                        const maxIceVelocity = TANK_SPEED * 2;
+                        const iceSpeed = Math.sqrt(tank.iceVelocityX * tank.iceVelocityX + tank.iceVelocityY * tank.iceVelocityY);
+                        if (iceSpeed > maxIceVelocity) {
+                            tank.iceVelocityX = (tank.iceVelocityX / iceSpeed) * maxIceVelocity;
+                            tank.iceVelocityY = (tank.iceVelocityY / iceSpeed) * maxIceVelocity;
+                        }
+                    }
                 }
             }
 
             // Clamp to screen bounds
             tank.x = Math.max(TANK_COLLISION_RADIUS, Math.min(canvas.width - TANK_COLLISION_RADIUS, tank.x));
             tank.y = Math.max(TANK_COLLISION_RADIUS, Math.min(canvas.height - TANK_COLLISION_RADIUS, tank.y));
+            
+            // Update tank tracks
+            tank.updateTracks();
         }
 
         function handleInput() {
@@ -917,6 +1553,10 @@
                 tank.angle = Math.PI;
             }
             tank.isHit = false;
+            
+            // Clear tank tracks on reset
+            tank.trackHistory = [];
+            tank.lastTrackPosition = { x: tank.x, y: tank.y, angle: tank.angle };
         }
         
         function gameLoop() {
@@ -925,7 +1565,7 @@
             handleInput();
 
             barriers.forEach(barrier => {
-                barrier.update();
+                barrier.update(barriers); // Pass all barriers for collision detection
                 if (barrier.type === 'moving') {
                     if (!player1.isHit && tankOverlapsBarrier(player1, barrier)) {
                         destroyTank(player1, true);
@@ -935,6 +1575,71 @@
                     }
                 }
                 barrier.draw();
+            });
+            
+            // Reset ice state for both tanks before checking hazards
+            player1.isOnIce = false;
+            player2.isOnIce = false;
+            player1.iceVelocityX = player1.iceVelocityX || 0;
+            player1.iceVelocityY = player1.iceVelocityY || 0;
+            player2.iceVelocityX = player2.iceVelocityX || 0;
+            player2.iceVelocityY = player2.iceVelocityY || 0;
+            
+            // Update and handle environmental hazards
+            hazards.forEach(hazard => {
+                hazard.update();
+                hazard.draw();
+                
+                // Check tank interactions with hazards
+                if (!player1.isHit && hazard.overlapsWithTank(player1)) {
+                    handleTankHazardInteraction(player1, hazard, true);
+                }
+                if (!player2.isHit && hazard.overlapsWithTank(player2)) {
+                    handleTankHazardInteraction(player2, hazard, false);
+                }
+            });
+            
+            // Apply ice momentum and friction when not on ice
+            [player1, player2].forEach(tank => {
+                if (!tank.isOnIce) {
+                    // Apply stored ice momentum
+                    if (Math.abs(tank.iceVelocityX) > 0.1 || Math.abs(tank.iceVelocityY) > 0.1) {
+                        const newX = Math.max(TANK_COLLISION_RADIUS, Math.min(canvas.width - TANK_COLLISION_RADIUS, tank.x + tank.iceVelocityX));
+                        const newY = Math.max(TANK_COLLISION_RADIUS, Math.min(canvas.height - TANK_COLLISION_RADIUS, tank.y + tank.iceVelocityY));
+                        
+                        // Check for collisions
+                        const otherTank = tank === player1 ? player2 : player1;
+                        let collision = false;
+                        
+                        if (Math.hypot(newX - otherTank.x, newY - otherTank.y) < (TANK_COLLISION_RADIUS * 2)) {
+                            collision = true;
+                        }
+                        
+                        for (const barrier of barriers) {
+                            if (barrier.isDestroyed && barrier.isDestroyed()) continue;
+                            if (newX + TANK_COLLISION_RADIUS > barrier.x - barrier.width/2 && 
+                                newX - TANK_COLLISION_RADIUS < barrier.x + barrier.width/2 &&
+                                newY + TANK_COLLISION_RADIUS > barrier.y - barrier.height/2 && 
+                                newY - TANK_COLLISION_RADIUS < barrier.y + barrier.height/2) {
+                                collision = true;
+                                break;
+                            }
+                        }
+                        
+                        if (!collision) {
+                            tank.x = newX;
+                            tank.y = newY;
+                        } else {
+                            // Stop sliding on collision
+                            tank.iceVelocityX = 0;
+                            tank.iceVelocityY = 0;
+                        }
+                    }
+                    
+                    // Apply friction to reduce momentum
+                    tank.iceVelocityX *= 0.9;
+                    tank.iceVelocityY *= 0.9;
+                }
             });
             
             bullets.forEach(bullet => {
