@@ -286,58 +286,305 @@
             ctx.restore();
         }
 
-        // --- Audio ---
-        const audioCtx = new (window.AudioContext || window.webkitAudioContext)();
-
+        // --- Enhanced Audio System ---
+        let audioCtx;
+        let masterGain;
+        let musicGain;
+        let sfxGain;
+        let backgroundMusic;
+        let audioEnabled = true;
+        
+        // Initialize audio context (requires user interaction)
+        function initializeAudio() {
+            if (!audioCtx) {
+                audioCtx = new (window.AudioContext || window.webkitAudioContext)();
+                
+                // Create master gain for volume control
+                masterGain = audioCtx.createGain();
+                masterGain.gain.setValueAtTime(0.7, audioCtx.currentTime);
+                masterGain.connect(audioCtx.destination);
+                
+                // Create separate gain nodes for music and sound effects
+                musicGain = audioCtx.createGain();
+                musicGain.gain.setValueAtTime(0.3, audioCtx.currentTime);
+                musicGain.connect(masterGain);
+                
+                sfxGain = audioCtx.createGain();
+                sfxGain.gain.setValueAtTime(0.8, audioCtx.currentTime);
+                sfxGain.connect(masterGain);
+                
+                // Background music disabled
+                // startBackgroundMusic();
+            }
+        }
+        
+        // Background music using procedural generation
+        function startBackgroundMusic() {
+            if (!audioCtx || !audioEnabled) return;
+            
+            const playMusicNote = (frequency, duration, delay = 0) => {
+                const oscillator = audioCtx.createOscillator();
+                const noteGain = audioCtx.createGain();
+                const filter = audioCtx.createBiquadFilter();
+                
+                oscillator.type = 'sine';
+                oscillator.frequency.setValueAtTime(frequency, audioCtx.currentTime + delay);
+                
+                filter.type = 'lowpass';
+                filter.frequency.setValueAtTime(frequency * 2, audioCtx.currentTime + delay);
+                filter.Q.setValueAtTime(1, audioCtx.currentTime + delay);
+                
+                noteGain.gain.setValueAtTime(0, audioCtx.currentTime + delay);
+                noteGain.gain.linearRampToValueAtTime(0.1, audioCtx.currentTime + delay + 0.1);
+                noteGain.gain.exponentialRampToValueAtTime(0.01, audioCtx.currentTime + delay + duration);
+                
+                oscillator.connect(filter);
+                filter.connect(noteGain);
+                noteGain.connect(musicGain);
+                
+                oscillator.start(audioCtx.currentTime + delay);
+                oscillator.stop(audioCtx.currentTime + delay + duration);
+            };
+            
+            // Simple ambient battle music loop
+            const playMusicLoop = () => {
+                if (!audioEnabled || !audioCtx) return;
+                
+                // Bass line
+                playMusicNote(55, 2, 0);   // A1
+                playMusicNote(65.4, 2, 2); // C2
+                playMusicNote(73.4, 2, 4); // D2
+                playMusicNote(55, 2, 6);   // A1
+                
+                // Melody
+                playMusicNote(220, 1, 1);   // A3
+                playMusicNote(261.6, 1, 2.5); // C4
+                playMusicNote(293.7, 1, 4);   // D4
+                playMusicNote(220, 1.5, 5.5); // A3
+                
+                // Schedule next loop
+                setTimeout(playMusicLoop, 8000);
+            };
+            
+            playMusicLoop();
+        }
+        
         function playExplosionSound() {
-            if (!audioCtx) return;
+            if (!audioCtx || !audioEnabled) return;
+            
+            // Enhanced explosion with multiple layers
+            const duration = 0.6;
+            
+            // Low frequency boom
+            const boomOsc = audioCtx.createOscillator();
+            const boomGain = audioCtx.createGain();
+            boomOsc.type = 'sine';
+            boomOsc.frequency.setValueAtTime(60, audioCtx.currentTime);
+            boomOsc.frequency.exponentialRampToValueAtTime(20, audioCtx.currentTime + 0.3);
+            boomGain.gain.setValueAtTime(0.8, audioCtx.currentTime);
+            boomGain.gain.exponentialRampToValueAtTime(0.01, audioCtx.currentTime + 0.4);
+            boomOsc.connect(boomGain);
+            boomGain.connect(sfxGain);
+            boomOsc.start();
+            boomOsc.stop(audioCtx.currentTime + 0.4);
+            
+            // High frequency crack
+            const crackOsc = audioCtx.createOscillator();
+            const crackGain = audioCtx.createGain();
+            crackOsc.type = 'square';
+            crackOsc.frequency.setValueAtTime(1000, audioCtx.currentTime);
+            crackOsc.frequency.exponentialRampToValueAtTime(100, audioCtx.currentTime + 0.1);
+            crackGain.gain.setValueAtTime(0.3, audioCtx.currentTime);
+            crackGain.gain.exponentialRampToValueAtTime(0.01, audioCtx.currentTime + 0.2);
+            crackOsc.connect(crackGain);
+            crackGain.connect(sfxGain);
+            crackOsc.start();
+            crackOsc.stop(audioCtx.currentTime + 0.2);
+            
+            // Noise burst
+            const bufferSize = audioCtx.sampleRate * 0.3;
+            const buffer = audioCtx.createBuffer(1, bufferSize, audioCtx.sampleRate);
+            const output = buffer.getChannelData(0);
+            for (let i = 0; i < bufferSize; i++) {
+                output[i] = (Math.random() * 2 - 1) * (1 - i / bufferSize) * 0.5;
+            }
+            const source = audioCtx.createBufferSource();
+            source.buffer = buffer;
+            const noiseGain = audioCtx.createGain();
+            noiseGain.gain.setValueAtTime(0.6, audioCtx.currentTime);
+            source.connect(noiseGain);
+            noiseGain.connect(sfxGain);
+            source.start(0);
+        }
+        
+        function playBulletFireSound() {
+            if (!audioCtx || !audioEnabled) return;
+            
+            const oscillator = audioCtx.createOscillator();
+            const gainNode = audioCtx.createGain();
+            const filter = audioCtx.createBiquadFilter();
+            
+            oscillator.type = 'sawtooth';
+            oscillator.frequency.setValueAtTime(800, audioCtx.currentTime);
+            oscillator.frequency.exponentialRampToValueAtTime(200, audioCtx.currentTime + 0.05);
+            
+            filter.type = 'highpass';
+            filter.frequency.setValueAtTime(100, audioCtx.currentTime);
+            
+            gainNode.gain.setValueAtTime(0.3, audioCtx.currentTime);
+            gainNode.gain.exponentialRampToValueAtTime(0.01, audioCtx.currentTime + 0.08);
+            
+            oscillator.connect(filter);
+            filter.connect(gainNode);
+            gainNode.connect(sfxGain);
+            
+            oscillator.start();
+            oscillator.stop(audioCtx.currentTime + 0.08);
+        }
+        
+        function playBarrierHitSound() {
+            if (!audioCtx || !audioEnabled) return;
+            
+            const oscillator = audioCtx.createOscillator();
+            const gainNode = audioCtx.createGain();
+            const filter = audioCtx.createBiquadFilter();
+            
+            oscillator.type = 'sawtooth';
+            oscillator.frequency.setValueAtTime(150, audioCtx.currentTime);
+            oscillator.frequency.exponentialRampToValueAtTime(80, audioCtx.currentTime + 0.15);
+            
+            filter.type = 'bandpass';
+            filter.frequency.setValueAtTime(200, audioCtx.currentTime);
+            filter.Q.setValueAtTime(5, audioCtx.currentTime);
+            
+            gainNode.gain.setValueAtTime(0.4, audioCtx.currentTime);
+            gainNode.gain.exponentialRampToValueAtTime(0.01, audioCtx.currentTime + 0.15);
+            
+            oscillator.connect(filter);
+            filter.connect(gainNode);
+            gainNode.connect(sfxGain);
+            
+            oscillator.start();
+            oscillator.stop(audioCtx.currentTime + 0.15);
+        }
+
+        function playBarrierBreakSound() {
+            if (!audioCtx || !audioEnabled) return;
+            
+            // Cracking sound
+            const crackOsc = audioCtx.createOscillator();
+            const crackGain = audioCtx.createGain();
+            crackOsc.type = 'square';
+            crackOsc.frequency.setValueAtTime(400, audioCtx.currentTime);
+            crackOsc.frequency.exponentialRampToValueAtTime(100, audioCtx.currentTime + 0.2);
+            crackGain.gain.setValueAtTime(0.5, audioCtx.currentTime);
+            crackGain.gain.exponentialRampToValueAtTime(0.01, audioCtx.currentTime + 0.3);
+            crackOsc.connect(crackGain);
+            crackGain.connect(sfxGain);
+            crackOsc.start();
+            crackOsc.stop(audioCtx.currentTime + 0.3);
+            
+            // Debris sound
             const bufferSize = audioCtx.sampleRate * 0.5;
             const buffer = audioCtx.createBuffer(1, bufferSize, audioCtx.sampleRate);
             const output = buffer.getChannelData(0);
             for (let i = 0; i < bufferSize; i++) {
-                output[i] = Math.random() * 2 - 1;
+                output[i] = (Math.random() * 2 - 1) * (1 - i / bufferSize) * 0.3;
             }
             const source = audioCtx.createBufferSource();
             source.buffer = buffer;
-            const gainNode = audioCtx.createGain();
-            gainNode.gain.setValueAtTime(1, audioCtx.currentTime);
-            gainNode.gain.exponentialRampToValueAtTime(0.01, audioCtx.currentTime + 0.3);
-            source.connect(gainNode);
-            gainNode.connect(audioCtx.destination);
+            const debrisGain = audioCtx.createGain();
+            debrisGain.gain.setValueAtTime(0.4, audioCtx.currentTime);
+            source.connect(debrisGain);
+            debrisGain.connect(sfxGain);
             source.start(0);
-            source.stop(audioCtx.currentTime + 0.3);
         }
         
-        function playBarrierHitSound() {
-            if (!audioCtx) return;
+        function playTeleportSound() {
+            if (!audioCtx || !audioEnabled) return;
+            
             const oscillator = audioCtx.createOscillator();
             const gainNode = audioCtx.createGain();
+            const filter = audioCtx.createBiquadFilter();
+            
+            oscillator.type = 'sine';
+            oscillator.frequency.setValueAtTime(200, audioCtx.currentTime);
+            oscillator.frequency.exponentialRampToValueAtTime(800, audioCtx.currentTime + 0.1);
+            oscillator.frequency.exponentialRampToValueAtTime(400, audioCtx.currentTime + 0.3);
+            
+            filter.type = 'lowpass';
+            filter.frequency.setValueAtTime(1000, audioCtx.currentTime);
+            filter.Q.setValueAtTime(10, audioCtx.currentTime);
+            
+            gainNode.gain.setValueAtTime(0, audioCtx.currentTime);
+            gainNode.gain.linearRampToValueAtTime(0.4, audioCtx.currentTime + 0.05);
+            gainNode.gain.exponentialRampToValueAtTime(0.01, audioCtx.currentTime + 0.3);
+            
+            oscillator.connect(filter);
+            filter.connect(gainNode);
+            gainNode.connect(sfxGain);
+            
+            oscillator.start();
+            oscillator.stop(audioCtx.currentTime + 0.3);
+        }
+        
+        function playPowerUpSound() {
+            if (!audioCtx || !audioEnabled) return;
+            
+            const oscillator = audioCtx.createOscillator();
+            const gainNode = audioCtx.createGain();
+            const filter = audioCtx.createBiquadFilter();
+            
+            oscillator.type = 'triangle';
+            oscillator.frequency.setValueAtTime(300, audioCtx.currentTime);
+            oscillator.frequency.exponentialRampToValueAtTime(600, audioCtx.currentTime + 0.1);
+            oscillator.frequency.exponentialRampToValueAtTime(800, audioCtx.currentTime + 0.2);
+            
+            filter.type = 'lowpass';
+            filter.frequency.setValueAtTime(2000, audioCtx.currentTime);
+            filter.Q.setValueAtTime(5, audioCtx.currentTime);
+            
+            gainNode.gain.setValueAtTime(0, audioCtx.currentTime);
+            gainNode.gain.linearRampToValueAtTime(0.3, audioCtx.currentTime + 0.05);
+            gainNode.gain.exponentialRampToValueAtTime(0.01, audioCtx.currentTime + 0.4);
+            
+            oscillator.connect(filter);
+            filter.connect(gainNode);
+            gainNode.connect(sfxGain);
+            
+            oscillator.start();
+            oscillator.stop(audioCtx.currentTime + 0.4);
+        }
+        
+        function playTankMoveSound() {
+            if (!audioCtx || !audioEnabled) return;
+            
+            const oscillator = audioCtx.createOscillator();
+            const gainNode = audioCtx.createGain();
+            const filter = audioCtx.createBiquadFilter();
+            
             oscillator.type = 'sawtooth';
-            oscillator.frequency.setValueAtTime(100, audioCtx.currentTime);
-            oscillator.frequency.exponentialRampToValueAtTime(50, audioCtx.currentTime + 0.1);
-            gainNode.gain.setValueAtTime(0.5, audioCtx.currentTime);
+            oscillator.frequency.setValueAtTime(40 + Math.random() * 20, audioCtx.currentTime);
+            
+            filter.type = 'lowpass';
+            filter.frequency.setValueAtTime(200, audioCtx.currentTime);
+            
+            gainNode.gain.setValueAtTime(0.1, audioCtx.currentTime);
             gainNode.gain.exponentialRampToValueAtTime(0.01, audioCtx.currentTime + 0.1);
-            oscillator.connect(gainNode);
-            gainNode.connect(audioCtx.destination);
+            
+            oscillator.connect(filter);
+            filter.connect(gainNode);
+            gainNode.connect(sfxGain);
+            
             oscillator.start();
             oscillator.stop(audioCtx.currentTime + 0.1);
         }
-
-        function playBarrierBreakSound() {
-            if (!audioCtx) return;
-            const bufferSize = audioCtx.sampleRate * 0.4;
-            const buffer = audioCtx.createBuffer(1, bufferSize, audioCtx.sampleRate);
-            const output = buffer.getChannelData(0);
-            for (let i = 0; i < bufferSize; i++) {
-                output[i] = (Math.random() * 2 - 1) * (1 - i / bufferSize);
+        
+        function toggleAudio() {
+            audioEnabled = !audioEnabled;
+            if (masterGain) {
+                masterGain.gain.setValueAtTime(audioEnabled ? 0.7 : 0, audioCtx.currentTime);
             }
-            const source = audioCtx.createBufferSource();
-            source.buffer = buffer;
-            const gainNode = audioCtx.createGain();
-            gainNode.gain.setValueAtTime(0.7, audioCtx.currentTime);
-            source.connect(gainNode);
-            gainNode.connect(audioCtx.destination);
-            source.start(0);
         }
 
         // --- Game State ---
@@ -346,6 +593,7 @@
         const explosions = [];
         const barriers = []; // Array to store barriers
         const hazards = []; // Array to store environmental hazards
+        const powerUps = []; // Array to store power-ups
         let player1Score = 0;
         let player2Score = 0;
         
@@ -353,6 +601,9 @@
         let gameMode = null; // 'twoPlayer' or 'vsAI'
         let gameRunning = false;
         let roundInProgress = false;
+        
+        // Power-up spawning
+        let lastPowerUpSpawn = 0;
 
         const TANK_SIZE = 40; // Now a square
         const TURRET_LENGTH = 34; // Shortened by 25%
@@ -386,6 +637,12 @@
         const ICE_FRICTION = 0.95; // Reduced friction on ice
         const ICE_SLIDE_FORCE = 0.8; // Momentum preservation on ice
 
+        // Power-up constants
+        const POWERUP_SPAWN_INTERVAL = 15000; // Spawn every 15 seconds
+        const POWERUP_MAX_ACTIVE = 3; // Maximum power-ups on field at once
+        const POWERUP_TYPES = ['spread', 'rapid', 'bounce', 'pierce'];
+        const POWERUP_SPAWN_ATTEMPTS = 20; // Max attempts to find valid spawn location
+
         // Use the combined width for collision radius (main body + track width)
         const TANK_COLLISION_RADIUS = TANK_SIZE / 2; 
         const TANK_START_MARGIN = TANK_COLLISION_RADIUS + 20;
@@ -403,6 +660,10 @@
                 this.trackHistory = []; // Store track positions for drawing trails
                 this.lastTrackPosition = { x: x, y: y, angle: 0 };
                 this.trackTimer = 0;
+                
+                // Power-up properties
+                this.activePowerUp = null;
+                this.powerUpEndTime = 0;
             }
 
             draw() {
@@ -445,6 +706,43 @@
                 ctx.arc(0, 0, this.size / 4, 0, 2 * Math.PI);
                 ctx.fill();
                 ctx.fillRect(0, -5, TURRET_LENGTH, 10);
+                
+                // Power-up visual effects
+                if (this.activePowerUp) {
+                    const now = Date.now();
+                    const timeLeft = this.powerUpEndTime - now;
+                    const totalDuration = new PowerUp(0, 0, this.activePowerUp).duration;
+                    const progress = timeLeft / totalDuration;
+                    
+                    // Get power-up color
+                    const powerUpColor = new PowerUp(0, 0, this.activePowerUp).color;
+                    
+                    // Pulsing glow effect
+                    const pulseIntensity = 0.5 + 0.3 * Math.sin(now * 0.01);
+                    ctx.shadowColor = powerUpColor;
+                    ctx.shadowBlur = 20 * pulseIntensity;
+                    
+                    // Outer glow ring
+                    ctx.strokeStyle = powerUpColor;
+                    ctx.globalAlpha = 0.6 * progress * pulseIntensity;
+                    ctx.lineWidth = 3;
+                    ctx.beginPath();
+                    ctx.arc(0, 0, this.size * 0.7, 0, Math.PI * 2);
+                    ctx.stroke();
+                    
+                    // Power-up symbol above tank
+                    ctx.globalAlpha = 0.8 * progress;
+                    ctx.fillStyle = powerUpColor;
+                    ctx.font = 'bold 14px Arial';
+                    ctx.textAlign = 'center';
+                    ctx.textBaseline = 'middle';
+                    const symbol = new PowerUp(0, 0, this.activePowerUp).symbol;
+                    ctx.fillText(symbol, 0, -this.size * 0.6);
+                    
+                    // Reset alpha and shadow
+                    ctx.globalAlpha = 1;
+                    ctx.shadowBlur = 0;
+                }
                 
                 ctx.restore();
             }
@@ -537,14 +835,68 @@
             
             fire() {
                 if (this.isHit) return;
+                
                 const now = Date.now();
-                if (now - this.lastShotTime > FIRE_RATE) {
+                let currentFireRate = FIRE_RATE;
+                
+                // Check if power-up is still active
+                if (this.activePowerUp && now > this.powerUpEndTime) {
+                    this.activePowerUp = null;
+                }
+                
+                // Adjust fire rate for rapid fire power-up
+                if (this.activePowerUp === 'rapid') {
+                    currentFireRate = FIRE_RATE * 0.3; // 3x faster firing
+                }
+                
+                if (now - this.lastShotTime > currentFireRate) {
                     this.lastShotTime = now;
+                    
                     // Bullet spawns from the front of the turret
                     const bulletX = this.x + Math.cos(this.angle) * TURRET_LENGTH;
                     const bulletY = this.y + Math.sin(this.angle) * TURRET_LENGTH;
-                    bullets.push(new Bullet(bulletX, bulletY, this.angle, this.turretColor));
+                    
+                    // Different firing patterns based on power-up
+                    switch(this.activePowerUp) {
+                        case 'spread':
+                            // Fire 3 bullets in a spread pattern
+                            const spreadAngle = 0.3; // 30 degree spread
+                            for (let i = -1; i <= 1; i++) {
+                                const angle = this.angle + (i * spreadAngle);
+                                const bx = this.x + Math.cos(angle) * TURRET_LENGTH;
+                                const by = this.y + Math.sin(angle) * TURRET_LENGTH;
+                                const bullet = new Bullet(bx, by, angle, this.turretColor);
+                                bullets.push(bullet);
+                            }
+                            break;
+                            
+                        case 'bounce':
+                            // Fire bullet that can bounce off barriers
+                            const bounceBullet = new Bullet(bulletX, bulletY, this.angle, this.turretColor);
+                            bounceBullet.bounces = 3; // Can bounce 3 times
+                            bullets.push(bounceBullet);
+                            break;
+                            
+                        case 'pierce':
+                            // Fire bullet that can go through barriers
+                            const pierceBullet = new Bullet(bulletX, bulletY, this.angle, this.turretColor);
+                            pierceBullet.pierce = true;
+                            bullets.push(pierceBullet);
+                            break;
+                            
+                        default:
+                            // Normal bullet
+                            bullets.push(new Bullet(bulletX, bulletY, this.angle, this.turretColor));
+                            break;
+                    }
+                    
+                    playBulletFireSound();
                 }
+            }
+            
+            collectPowerUp(powerUpData) {
+                this.activePowerUp = powerUpData.type;
+                this.powerUpEndTime = Date.now() + powerUpData.duration;
             }
         }
         
@@ -1462,6 +1814,10 @@
                 this.color = color;
                 this.speed = BULLET_SPEED;
                 this.hasBounced = false;
+                
+                // Power-up properties
+                this.bounces = 0; // Number of bounces remaining (0 = normal bullet)
+                this.pierce = false; // Can pierce through barriers
             }
             
             update() {
@@ -1584,6 +1940,121 @@
 
             isFinished() {
                 return this.frame > this.lifespan;
+            }
+        }
+
+        class PowerUp {
+            constructor(x, y, type) {
+                this.x = x;
+                this.y = y;
+                this.type = type;
+                this.size = 25;
+                this.collected = false;
+                this.animationFrame = 0;
+                this.duration = this.getPowerUpDuration();
+                
+                // Visual properties
+                this.color = this.getPowerUpColor();
+                this.symbol = this.getPowerUpSymbol();
+            }
+
+            getPowerUpDuration() {
+                switch(this.type) {
+                    case 'spread': return 10000; // 10 seconds
+                    case 'rapid': return 8000;   // 8 seconds
+                    case 'bounce': return 12000; // 12 seconds
+                    case 'pierce': return 15000; // 15 seconds
+                    default: return 10000;
+                }
+            }
+
+            getPowerUpColor() {
+                switch(this.type) {
+                    case 'spread': return '#ff6b35'; // Orange
+                    case 'rapid': return '#f7931e';  // Yellow-orange
+                    case 'bounce': return '#9b59b6'; // Purple
+                    case 'pierce': return '#e74c3c'; // Red
+                    default: return '#95a5a6';
+                }
+            }
+
+            getPowerUpSymbol() {
+                switch(this.type) {
+                    case 'spread': return '◊';  // Diamond for spread shot
+                    case 'rapid': return '≡';   // Triple lines for rapid fire
+                    case 'bounce': return '◈';  // Diamond with lines for bounce
+                    case 'pierce': return '→';  // Arrow for pierce shot
+                    default: return '?';
+                }
+            }
+
+            update() {
+                this.animationFrame++;
+            }
+
+            draw() {
+                if (this.collected) return;
+
+                ctx.save();
+                ctx.translate(this.x, this.y);
+                
+                // Floating animation
+                const floatOffset = Math.sin(this.animationFrame * 0.1) * 3;
+                ctx.translate(0, floatOffset);
+                
+                // Rotation animation
+                ctx.rotate(this.animationFrame * 0.02);
+                
+                // Glow effect
+                ctx.shadowColor = this.color;
+                ctx.shadowBlur = 15;
+                
+                // Outer ring
+                ctx.strokeStyle = this.color;
+                ctx.lineWidth = 3;
+                ctx.beginPath();
+                ctx.arc(0, 0, this.size * 0.8, 0, Math.PI * 2);
+                ctx.stroke();
+                
+                // Inner filled circle
+                ctx.fillStyle = this.color;
+                ctx.globalAlpha = 0.3;
+                ctx.beginPath();
+                ctx.arc(0, 0, this.size * 0.6, 0, Math.PI * 2);
+                ctx.fill();
+                
+                // Symbol
+                ctx.globalAlpha = 1;
+                ctx.fillStyle = '#ffffff';
+                ctx.font = 'bold 16px Arial';
+                ctx.textAlign = 'center';
+                ctx.textBaseline = 'middle';
+                ctx.fillText(this.symbol, 0, 0);
+                
+                // Pulsing outer glow
+                const pulseAlpha = 0.3 + 0.3 * Math.sin(this.animationFrame * 0.15);
+                ctx.globalAlpha = pulseAlpha;
+                ctx.strokeStyle = this.color;
+                ctx.lineWidth = 2;
+                ctx.beginPath();
+                ctx.arc(0, 0, this.size, 0, Math.PI * 2);
+                ctx.stroke();
+                
+                ctx.restore();
+            }
+
+            checkCollision(tank) {
+                if (this.collected) return false;
+                const distance = Math.hypot(tank.x - this.x, tank.y - this.y);
+                return distance < (this.size + TANK_COLLISION_RADIUS);
+            }
+
+            collect() {
+                this.collected = true;
+                return {
+                    type: this.type,
+                    duration: this.duration
+                };
             }
         }
         
@@ -1838,6 +2309,49 @@
             }
         }
 
+        function spawnPowerUp() {
+            // Don't spawn if we have too many power-ups already
+            if (powerUps.filter(p => !p.collected).length >= POWERUP_MAX_ACTIVE) return;
+            
+            // Find a valid spawn location
+            for (let attempts = 0; attempts < POWERUP_SPAWN_ATTEMPTS; attempts++) {
+                const x = 100 + Math.random() * (canvas.width - 200);
+                const y = 100 + Math.random() * (canvas.height - 200);
+                
+                // Check if location conflicts with barriers
+                let validLocation = true;
+                for (const barrier of barriers) {
+                    if (!barrier.isDestroyed()) {
+                        const dx = Math.abs(x - barrier.x);
+                        const dy = Math.abs(y - barrier.y);
+                        if (dx < barrier.width/2 + 40 && dy < barrier.height/2 + 40) {
+                            validLocation = false;
+                            break;
+                        }
+                    }
+                }
+                
+                // Check if location conflicts with hazards
+                for (const hazard of hazards) {
+                    const distance = Math.hypot(x - hazard.x, y - hazard.y);
+                    if (distance < hazard.width/2 + 40) {
+                        validLocation = false;
+                        break;
+                    }
+                }
+                
+                // Check if location is too close to tanks
+                if (player1 && Math.hypot(x - player1.x, y - player1.y) < 80) validLocation = false;
+                if (player2 && Math.hypot(x - player2.x, y - player2.y) < 80) validLocation = false;
+                
+                if (validLocation) {
+                    const randomType = POWERUP_TYPES[Math.floor(Math.random() * POWERUP_TYPES.length)];
+                    powerUps.push(new PowerUp(x, y, randomType));
+                    break;
+                }
+            }
+        }
+
         function destroyTank(tank, isPlayer1Tank) {
             if (tank.isHit) return;
             if (isPlayer1Tank) {
@@ -1883,6 +2397,7 @@
                 // Add teleport effect
                 explosions.push(new TeleportEffect(hazard.x, hazard.y));
                 explosions.push(new TeleportEffect(hazard.partner.x, hazard.partner.y));
+                playTeleportSound();
             } else if (hazard.type === 'conveyor') {
                 // Apply conveyor force to tank movement
                 const forceX = hazard.direction === 0 ? hazard.force : hazard.direction === 2 ? -hazard.force : 0;
@@ -1945,6 +2460,8 @@
                 restartGame();
             } else if (e.code === 'Minus') {
                 showDebugInfo = !showDebugInfo;
+            } else if (e.code === 'KeyM') {
+                toggleAudio();
             }
         });
         document.addEventListener('keyup', (e) => { keys[e.code] = false; });
@@ -1959,6 +2476,10 @@
             explosions.length = 0;
             barriers.length = 0;
             hazards.length = 0;
+            powerUps.length = 0;
+            
+            // Reset power-up spawning
+            lastPowerUpSpawn = Date.now();
             
             // Reinitialize tanks
             initializeTanks();
@@ -1988,6 +2509,9 @@
                 const moveY = Math.sin(tank.angle) * TANK_SPEED * moveDirection;
                 const nextX = tank.x + moveX;
                 const nextY = tank.y + moveY;
+
+                // Play tank movement sound
+                playTankMoveSound();
 
                 let collision = false;
                 // Barrier collision (using AABB with the TANK_COLLISION_RADIUS)
@@ -2065,6 +2589,21 @@
                         bullet.y + bullet.radius > barrier.y - barrier.height / 2 && 
                         bullet.y - bullet.radius < barrier.y + barrier.height / 2) {
                         
+                        // Pierce bullets go through barriers
+                        if (bullet.pierce) {
+                            // Damage breakable barriers but continue through
+                            if (barrier.type === 'breakable') {
+                                barrier.takeDamage();
+                                if (barrier.isDestroyed()) {
+                                    playBarrierBreakSound();
+                                    barriers.splice(j, 1);
+                                } else {
+                                    playBarrierHitSound();
+                                }
+                            }
+                            continue; // Don't stop the bullet
+                        }
+                        
                         if (barrier.type === 'breakable') {
                             const hadMoreThanOneHealth = barrier.health > 1;
                             barrier.takeDamage();
@@ -2077,14 +2616,25 @@
 
                             playBarrierHitSound();
 
-                            if (!bullet.hasBounced && hadMoreThanOneHealth) {
+                            // Bounce bullets can bounce multiple times
+                            if (bullet.bounces > 0) {
+                                bounceBulletOffBarrier(bullet, barrier);
+                                bullet.bounces--;
+                                continue bulletsLoop;
+                            } else if (!bullet.hasBounced && hadMoreThanOneHealth) {
                                 bounceBulletOffBarrier(bullet, barrier);
                                 bullet.hasBounced = true;
                                 continue bulletsLoop;
                             }
                         } else {
                             playBarrierHitSound();
-                            if (!bullet.hasBounced) {
+                            
+                            // Bounce bullets can bounce multiple times
+                            if (bullet.bounces > 0) {
+                                bounceBulletOffBarrier(bullet, barrier);
+                                bullet.bounces--;
+                                continue bulletsLoop;
+                            } else if (!bullet.hasBounced) {
                                 bounceBulletOffBarrier(bullet, barrier);
                                 bullet.hasBounced = true;
                                 continue bulletsLoop;
@@ -2168,6 +2718,10 @@
                 tank.angle = Math.PI;
             }
             tank.isHit = false;
+            
+            // Clear active power-ups
+            tank.activePowerUp = null;
+            tank.powerUpEndTime = 0;
             
             // Clear tank tracks on reset
             tank.trackHistory = [];
@@ -2262,6 +2816,42 @@
                 player2.update(player1);
             }
             
+            // Handle power-up spawning
+            const now = Date.now();
+            if (now - lastPowerUpSpawn > POWERUP_SPAWN_INTERVAL) {
+                spawnPowerUp();
+                lastPowerUpSpawn = now;
+            }
+            
+            // Update and draw power-ups
+            powerUps.forEach((powerUp, index) => {
+                if (!powerUp.collected) {
+                    powerUp.update();
+                    powerUp.draw();
+                    
+                    // Check collision with player 1
+                    if (!player1.isHit && powerUp.checkCollision(player1)) {
+                        const powerUpData = powerUp.collect();
+                        player1.collectPowerUp(powerUpData);
+                        playPowerUpSound();
+                    }
+                    
+                    // Check collision with player 2
+                    if (!player2.isHit && powerUp.checkCollision(player2)) {
+                        const powerUpData = powerUp.collect();
+                        player2.collectPowerUp(powerUpData);
+                        playPowerUpSound();
+                    }
+                }
+            });
+            
+            // Remove collected power-ups
+            for (let i = powerUps.length - 1; i >= 0; i--) {
+                if (powerUps[i].collected) {
+                    powerUps.splice(i, 1);
+                }
+            }
+            
             bullets.forEach(bullet => {
                 bullet.update();
                 bullet.draw();
@@ -2337,6 +2927,9 @@
             document.getElementById('gameCanvas').style.display = 'block';
             document.getElementById('controls').style.display = 'block';
             
+            // Initialize audio system
+            initializeAudio();
+            
             // Update controls text based on game mode
             updateControlsText();
             
@@ -2354,13 +2947,13 @@
                 controls.innerHTML = `
                     <div><strong>Player 1 (Red):</strong> WASD to move, Space to shoot</div>
                     <div><strong>Player 2 (Blue):</strong> Arrow keys to move, Enter to shoot</div>
-                    <div>Press 'R' to restart, '-' for debug info</div>
+                    <div>Press 'R' to restart, '-' for debug info, 'M' to toggle audio</div>
                 `;
             } else if (gameMode === 'vsAI') {
                 controls.innerHTML = `
                     <div><strong>Player (Red):</strong> WASD to move, Space to shoot</div>
                     <div><strong>AI (Blue):</strong> Controlled by computer</div>
-                    <div>Press 'R' to restart, '-' for debug info</div>
+                    <div>Press 'R' to restart, '-' for debug info, 'M' to toggle audio</div>
                 `;
             }
         }
