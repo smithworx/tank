@@ -160,18 +160,89 @@
         const player2ScoreDisplay = document.getElementById('player2ScoreDisplay');
 
         // --- Game Setup ---
-        let canvasWidth = Math.min(window.innerWidth * 0.9, 1000);
-        let canvasHeight = canvasWidth * 0.6;
+        function calculateOptimalCanvasDimensions() {
+            // Calculate the maximum desired width based on window size
+            const maxDesiredWidth = Math.min(window.innerWidth * 0.9, 1000);
+            
+            // Use the actual values: TANK_SIZE = 40, BARRIER_SIZE = TANK_SIZE * 1.2 = 48
+            const gridSize = 48; // BARRIER_SIZE constant value
+            
+            // Calculate how many complete grid squares fit in the maximum desired width
+            const maxGridColumns = Math.floor(maxDesiredWidth / gridSize);
+            
+            // Ensure we have at least a minimum number of columns for playability
+            const minColumns = 10; // Minimum viable playing field
+            const actualColumns = Math.max(maxGridColumns, minColumns);
+            
+            // Set canvas width to exactly fit those grid squares (maximizes space while staying grid-aligned)
+            const alignedWidth = actualColumns * gridSize;
+            const alignedHeight = alignedWidth * 0.6;
+            
+            return { width: alignedWidth, height: alignedHeight };
+        }
+        
+        let dimensions = calculateOptimalCanvasDimensions();
+        let canvasWidth = dimensions.width;
+        let canvasHeight = dimensions.height;
         canvas.width = canvasWidth;
         canvas.height = canvasHeight;
 
         window.addEventListener('resize', () => {
-            canvasWidth = Math.min(window.innerWidth * 0.9, 1000);
-            canvasHeight = canvasWidth * 0.6;
+            dimensions = calculateOptimalCanvasDimensions();
+            canvasWidth = dimensions.width;
+            canvasHeight = dimensions.height;
             canvas.width = canvasWidth;
             canvas.height = canvasHeight;
             generateBarriers(); // Regenerate barriers for new size
         });
+
+        function drawGrid() {
+            ctx.save();
+            const step = 48; // BARRIER_SIZE = TANK_SIZE * 1.2 = 40 * 1.2 = 48
+            const columns = Math.floor(canvas.width / step);
+            const centerIndex = Math.floor(columns / 2);
+
+            // Fill the two central columns with a lighter background for perfect symmetry
+            if (columns >= 2) {
+                ctx.fillStyle = 'rgba(255, 255, 255, 0.08)'; // Increased opacity for better visibility
+                
+                // For even number of columns, draw the two middle columns
+                // For odd number of columns, draw the center column and the one to its right
+                if (columns % 2 === 0) {
+                    // Even columns: draw columns at centerIndex-1 and centerIndex
+                    const leftCenterX = (centerIndex - 1) * step;
+                    const rightCenterX = centerIndex * step;
+                    ctx.fillRect(leftCenterX, 0, step, canvas.height);
+                    ctx.fillRect(rightCenterX, 0, step, canvas.height);
+                } else {
+                    // Odd columns: draw center column and the one to its right
+                    const centerX = centerIndex * step;
+                    const rightCenterX = (centerIndex + 1) * step;
+                    ctx.fillRect(centerX, 0, step, canvas.height);
+                    if (centerIndex + 1 < columns) { // Make sure we don't go out of bounds
+                        ctx.fillRect(rightCenterX, 0, step, canvas.height);
+                    }
+                }
+            }
+
+            ctx.strokeStyle = 'rgba(0, 0, 0, 0.35)';
+            ctx.lineWidth = 1;
+
+            for (let x = step; x < canvas.width; x += step) {
+                ctx.beginPath();
+                ctx.moveTo(x, 0);
+                ctx.lineTo(x, canvas.height);
+                ctx.stroke();
+            }
+
+            for (let y = step; y < canvas.height; y += step) {
+                ctx.beginPath();
+                ctx.moveTo(0, y);
+                ctx.lineTo(canvas.width, y);
+                ctx.stroke();
+            }
+            ctx.restore();
+        }
 
         // --- Audio ---
         const audioCtx = new (window.AudioContext || window.webkitAudioContext)();
@@ -242,9 +313,17 @@
         const TURN_SPEED = 2.5 * Math.PI / 180;
         const BULLET_SPEED = 5;
         const FIRE_RATE = 500;
+        const BARRIER_SIZE = TANK_SIZE * 1.2;
+        const BARRIER_PADDING = 4;
         const BARRIER_SPAWN_CHANCE = 0.06;
         const BARRIER_MIN_LENGTH = 2;
         const BARRIER_MAX_LENGTH = 5;
+        const BARRIER_TYPE_CHANCES = {
+            indestructible: 0.2,
+            moving: 0.15
+        };
+        const MOVING_BARRIER_SPEED = 1.3;
+        const MOVING_BARRIER_RANGE_MULTIPLIER = 2.5;
 
         // Use the combined width for collision radius (main body + track width)
         const TANK_COLLISION_RADIUS = TANK_SIZE / 2; 
@@ -313,56 +392,148 @@
         }
         
         class Barrier {
-            constructor(x, y, width, height, health) {
+            constructor(x, y, width, height, options = {}) {
                 this.x = x;
                 this.y = y;
                 this.width = width;
                 this.height = height;
-                this.health = health;
-                this.maxHealth = health;
+                this.type = options.type || 'breakable';
+                const resolvedHealth = options.health ?? 1;
+                if (this.type === 'breakable') {
+                    this.health = resolvedHealth;
+                    this.maxHealth = resolvedHealth;
+                } else {
+                    this.health = Number.isFinite(resolvedHealth) ? resolvedHealth : Infinity;
+                    this.maxHealth = this.health;
+                }
+                this.axis = options.axis || 'horizontal';
+                this.speed = options.speed || 0;
+                this.range = Math.max(0, options.range || 0);
+                this.originX = x;
+                this.originY = y;
+                this.direction = options.initialDirection || 1;
+                if (this.type === 'moving') {
+                    if (this.axis === 'horizontal') {
+                        const leftLimit = this.originX - this.width / 2;
+                        const rightLimit = canvas.width - this.width / 2 - this.originX;
+                        const maxRange = Math.max(0, Math.min(leftLimit, rightLimit));
+                        this.range = Math.min(this.range, maxRange);
+                    } else {
+                        const topLimit = this.originY - this.height / 2;
+                        const bottomLimit = canvas.height - this.height / 2 - this.originY;
+                        const maxRange = Math.max(0, Math.min(topLimit, bottomLimit));
+                        this.range = Math.min(this.range, maxRange);
+                    }
+                    if (this.range <= 0 || this.speed <= 0) {
+                        this.speed = 0;
+                        this.direction = 0;
+                    }
+                }
             }
 
             draw() {
-                if (this.health <= 0) return;
+                if (this.isDestroyed()) return;
 
-                // --- Visual distinction for initial health ---
-                const baseHue = 15; // Reddish-brown for a brick look
-                let saturation = 50;
-                if (this.maxHealth === 3) {
-                    saturation = 65; // More vibrant for full health
-                } else if (this.maxHealth === 1) {
-                    saturation = 35; // Faded for low health
-                }
-
-                // Brightness decreases with damage
-                const brightness = 35 + 20 * (this.health / this.maxHealth);
-                ctx.fillStyle = `hsl(${baseHue}, ${saturation}%, ${brightness}%)`;
-                ctx.strokeStyle = `hsl(${baseHue}, ${saturation}%, ${brightness - 20}%)`; // Darker border
-                ctx.lineWidth = 4;
-
-                // Draw the brick and its border
-                ctx.fillRect(this.x - this.width / 2, this.y - this.height / 2, this.width, this.height);
-                ctx.strokeRect(this.x - this.width / 2, this.y - this.height / 2, this.width, this.height);
-
-                // Draw cracks
-                ctx.strokeStyle = 'rgba(0, 0, 0, 0.7)';
+                ctx.save();
                 ctx.lineWidth = 2;
-                ctx.beginPath();
-                const currentCracks = this.maxHealth - this.health;
-                
-                if (currentCracks >= 1) {
-                    ctx.moveTo(this.x - this.width / 2 + 5, this.y - this.height / 2 + 5);
-                    ctx.lineTo(this.x + this.width / 2 - 5, this.y + this.height / 2 - 5);
+
+                if (this.type === 'breakable') {
+                    const baseHue = 15;
+                    let saturation = 50;
+                    if (this.maxHealth === 3) {
+                        saturation = 65;
+                    } else if (this.maxHealth === 1) {
+                        saturation = 35;
+                    }
+                    const healthRatio = this.health / this.maxHealth;
+                    const brightness = 35 + 20 * healthRatio;
+                    ctx.fillStyle = `hsl(${baseHue}, ${saturation}%, ${brightness}%)`;
+                    ctx.strokeStyle = `hsl(${baseHue}, ${saturation}%, ${brightness - 20}%)`;
+                    ctx.fillRect(this.x - this.width / 2, this.y - this.height / 2, this.width, this.height);
+                    ctx.strokeRect(this.x - this.width / 2, this.y - this.height / 2, this.width, this.height);
+
+                    ctx.strokeStyle = 'rgba(0, 0, 0, 0.7)';
+                    ctx.lineWidth = 2;
+                    ctx.beginPath();
+                    const currentCracks = this.maxHealth - this.health;
+                    
+                    if (currentCracks >= 1) {
+                        ctx.moveTo(this.x - this.width / 2 + 5, this.y - this.height / 2 + 5);
+                        ctx.lineTo(this.x + this.width / 2 - 5, this.y + this.height / 2 - 5);
+                    }
+                    if (currentCracks >= 2) {
+                        ctx.moveTo(this.x + this.width / 2 - 5, this.y - this.height / 2 + 5);
+                        ctx.lineTo(this.x - this.width / 2 + 5, this.y + this.height / 2 - 5);
+                    }
+                    ctx.stroke();
+                } else if (this.type === 'indestructible') {
+                    const gradient = ctx.createLinearGradient(this.x - this.width / 2, this.y - this.height / 2, this.x + this.width / 2, this.y + this.height / 2);
+                    gradient.addColorStop(0, '#95a5a6');
+                    gradient.addColorStop(1, '#7f8c8d');
+                    ctx.fillStyle = gradient;
+                    ctx.strokeStyle = '#bdc3c7';
+                    ctx.fillRect(this.x - this.width / 2, this.y - this.height / 2, this.width, this.height);
+                    ctx.strokeRect(this.x - this.width / 2, this.y - this.height / 2, this.width, this.height);
+                } else if (this.type === 'moving') {
+                    const glow = this.axis === 'horizontal' ? '#f39c12' : '#9b59b6';
+                    ctx.fillStyle = glow;
+                    ctx.strokeStyle = 'rgba(0,0,0,0.6)';
+                    ctx.shadowColor = glow;
+                    ctx.shadowBlur = 12;
+                    ctx.fillRect(this.x - this.width / 2, this.y - this.height / 2, this.width, this.height);
+                    ctx.strokeRect(this.x - this.width / 2, this.y - this.height / 2, this.width, this.height);
+                    ctx.shadowBlur = 0;
+                    ctx.shadowColor = 'transparent';
                 }
-                if (currentCracks >= 2) {
-                    ctx.moveTo(this.x + this.width / 2 - 5, this.y - this.height / 2 + 5);
-                    ctx.lineTo(this.x - this.width / 2 + 5, this.y + this.height / 2 - 5);
-                }
-                ctx.stroke();
+                ctx.restore();
             }
 
             takeDamage() {
+                if (this.type !== 'breakable') return;
                 this.health--;
+            }
+
+            isDestroyed() {
+                return this.type === 'breakable' && this.health <= 0;
+            }
+
+            update() {
+                if (this.type !== 'moving' || this.isDestroyed() || this.direction === 0 || this.speed <= 0) return;
+                if (this.axis === 'horizontal') {
+                    this.x += this.speed * this.direction;
+                    const displacement = this.x - this.originX;
+                    if (Math.abs(displacement) >= this.range) {
+                        this.direction *= -1;
+                        const sign = Math.sign(displacement) || this.direction;
+                        this.x = this.originX + sign * this.range;
+                    }
+                    const minX = this.width / 2;
+                    const maxX = canvas.width - this.width / 2;
+                    if (this.x <= minX) {
+                        this.x = minX;
+                        this.direction = 1;
+                    } else if (this.x >= maxX) {
+                        this.x = maxX;
+                        this.direction = -1;
+                    }
+                } else {
+                    this.y += this.speed * this.direction;
+                    const displacement = this.y - this.originY;
+                    if (Math.abs(displacement) >= this.range) {
+                        this.direction *= -1;
+                        const sign = Math.sign(displacement) || this.direction;
+                        this.y = this.originY + sign * this.range;
+                    }
+                    const minY = this.height / 2;
+                    const maxY = canvas.height - this.height / 2;
+                    if (this.y <= minY) {
+                        this.y = minY;
+                        this.direction = 1;
+                    } else if (this.y >= maxY) {
+                        this.y = maxY;
+                        this.direction = -1;
+                    }
+                }
             }
         }
 
@@ -485,7 +656,9 @@
         
         function generateBarriers() {
             barriers.length = 0;
-            const barrierSize = TANK_SIZE; // Make barriers same size as tanks
+            const barrierSize = BARRIER_SIZE; // Grid cell size for placement
+            // Remove padding - barriers now fill the entire grid square
+            const barrierInteriorSize = barrierSize; // Full size instead of padded size
             const gridCols = Math.floor((canvas.width / 2) / barrierSize);
             const gridRows = Math.floor(canvas.height / barrierSize);
             const occupied = new Set();
@@ -497,8 +670,20 @@
                     if (occupied.has(key) || col < safeZoneCols) continue;
 
                     if (Math.random() < BARRIER_SPAWN_CHANCE) {
-                        const wallLength = Math.floor(Math.random() * (BARRIER_MAX_LENGTH - BARRIER_MIN_LENGTH + 1)) + BARRIER_MIN_LENGTH;
-                        const direction = Math.random() < 0.5 ? 'horizontal' : 'vertical';
+                        const typeRoll = Math.random();
+                        let barrierType = 'breakable';
+                        if (typeRoll < BARRIER_TYPE_CHANCES.indestructible) {
+                            barrierType = 'indestructible';
+                        } else if (typeRoll < BARRIER_TYPE_CHANCES.indestructible + BARRIER_TYPE_CHANCES.moving) {
+                            barrierType = 'moving';
+                        }
+
+                        let wallLength = Math.floor(Math.random() * (BARRIER_MAX_LENGTH - BARRIER_MIN_LENGTH + 1)) + BARRIER_MIN_LENGTH;
+                        let direction = Math.random() < 0.5 ? 'horizontal' : 'vertical';
+                        if (barrierType === 'moving') {
+                            wallLength = 1;
+                        }
+
                         let currentCol = col;
                         let currentRow = row;
 
@@ -510,10 +695,24 @@
                             const x = currentCol * barrierSize + barrierSize / 2;
                             const y = currentRow * barrierSize + barrierSize / 2;
                             const randomHealth = Math.floor(Math.random() * 3) + 1;
+                            const baseOptions = { type: barrierType };
+                            if (barrierType === 'breakable') {
+                                baseOptions.health = randomHealth;
+                            } else if (barrierType === 'moving') {
+                                baseOptions.axis = Math.random() < 0.5 ? 'horizontal' : 'vertical';
+                                baseOptions.speed = MOVING_BARRIER_SPEED + Math.random() * 0.6;
+                                baseOptions.range = barrierSize * MOVING_BARRIER_RANGE_MULTIPLIER;
+                                baseOptions.initialDirection = Math.random() < 0.5 ? 1 : -1;
+                                baseOptions.health = Infinity;
+                            }
                             
                             occupied.add(currentKey);
-                            barriers.push(new Barrier(x, y, barrierSize, barrierSize, randomHealth));
-                            barriers.push(new Barrier(canvas.width - x, y, barrierSize, barrierSize, randomHealth));
+                            const mirrorOptions = Object.assign({}, baseOptions);
+                            if (baseOptions.type === 'moving') {
+                                mirrorOptions.initialDirection = -(baseOptions.initialDirection || 1);
+                            }
+                            barriers.push(new Barrier(x, y, barrierInteriorSize, barrierInteriorSize, Object.assign({}, baseOptions)));
+                            barriers.push(new Barrier(canvas.width - x, y, barrierInteriorSize, barrierInteriorSize, mirrorOptions));
                             
                             if (direction === 'horizontal') currentCol++;
                             else currentRow++;
@@ -522,12 +721,36 @@
                 }
             }
         }
+
+        function destroyTank(tank, isPlayer1Tank) {
+            if (tank.isHit) return;
+            if (isPlayer1Tank) {
+                player2Score++;
+            } else {
+                player1Score++;
+            }
+            updateScoreboard();
+            const explosion = new Explosion(tank.x, tank.y);
+            explosions.push(explosion);
+            playExplosionSound();
+            tank.isHit = true;
+            const respawnDelay = explosion.lifespan * (1000 / 60);
+            setTimeout(() => resetTank(tank, isPlayer1Tank), respawnDelay);
+        }
+
+        function tankOverlapsBarrier(tank, barrier) {
+            return tank.x + TANK_COLLISION_RADIUS > barrier.x - barrier.width / 2 &&
+                   tank.x - TANK_COLLISION_RADIUS < barrier.x + barrier.width / 2 &&
+                   tank.y + TANK_COLLISION_RADIUS > barrier.y - barrier.height / 2 &&
+                   tank.y - TANK_COLLISION_RADIUS < barrier.y + barrier.height / 2;
+        }
         
         document.addEventListener('keydown', (e) => { keys[e.code] = true; });
         document.addEventListener('keyup', (e) => { keys[e.code] = false; });
         
         function handleTankMovement(tank, forwardKey, backwardKey, leftKey, rightKey, otherTank) {
              if (tank.isHit) return;
+             const isPlayer1Tank = tank === player1;
 
             // --- Rotation ---
             if (keys[leftKey]) tank.rotate(-1);
@@ -547,8 +770,12 @@
                 let collision = false;
                 // Barrier collision (using AABB with the TANK_COLLISION_RADIUS)
                 for (const barrier of barriers) {
-                     if (nextX + TANK_COLLISION_RADIUS > barrier.x - barrier.width/2 && nextX - TANK_COLLISION_RADIUS < barrier.x + barrier.width/2 &&
+                    if (barrier.isDestroyed()) continue;
+                    if (nextX + TANK_COLLISION_RADIUS > barrier.x - barrier.width/2 && nextX - TANK_COLLISION_RADIUS < barrier.x + barrier.width/2 &&
                         nextY + TANK_COLLISION_RADIUS > barrier.y - barrier.height/2 && nextY - TANK_COLLISION_RADIUS < barrier.y + barrier.height/2) {
+                        if (barrier.type === 'moving') {
+                            destroyTank(tank, isPlayer1Tank);
+                        }
                         collision = true; break;
                     }
                 }
@@ -583,24 +810,34 @@
                 // Bullet-barrier collision
                 for (let j = barriers.length - 1; j >= 0; j--) {
                     const barrier = barriers[j];
+                    if (barrier.isDestroyed()) continue;
                     if (bullet.x > barrier.x - barrier.width / 2 && bullet.x < barrier.x + barrier.width / 2 &&
                         bullet.y > barrier.y - barrier.height / 2 && bullet.y < barrier.y + barrier.height / 2) {
                         
-                        const hadMoreThanOneHealth = barrier.health > 1;
-                        barrier.takeDamage();
-                        if (barrier.health <= 0) {
-                            playBarrierBreakSound();
-                            barriers.splice(j, 1);
-                            bullets.splice(i, 1);
-                            continue bulletsLoop;
-                        }
+                        if (barrier.type === 'breakable') {
+                            const hadMoreThanOneHealth = barrier.health > 1;
+                            barrier.takeDamage();
+                            if (barrier.isDestroyed()) {
+                                playBarrierBreakSound();
+                                barriers.splice(j, 1);
+                                bullets.splice(i, 1);
+                                continue bulletsLoop;
+                            }
 
-                        playBarrierHitSound();
+                            playBarrierHitSound();
 
-                        if (!bullet.hasBounced && hadMoreThanOneHealth) {
-                            bounceBulletOffBarrier(bullet, barrier);
-                            bullet.hasBounced = true;
-                            continue bulletsLoop;
+                            if (!bullet.hasBounced && hadMoreThanOneHealth) {
+                                bounceBulletOffBarrier(bullet, barrier);
+                                bullet.hasBounced = true;
+                                continue bulletsLoop;
+                            }
+                        } else {
+                            playBarrierHitSound();
+                            if (!bullet.hasBounced) {
+                                bounceBulletOffBarrier(bullet, barrier);
+                                bullet.hasBounced = true;
+                                continue bulletsLoop;
+                            }
                         }
 
                         bullets.splice(i, 1);
@@ -611,25 +848,15 @@
                 // Bullet-tank collision
                 const dist1 = Math.hypot(bullet.x - player1.x, bullet.y - player1.y);
                 if (dist1 < TANK_COLLISION_RADIUS && !player1.isHit) { // Use TANK_COLLISION_RADIUS for bullet-tank
-                    player2Score++;
-                    updateScoreboard();
                     bullets.splice(i, 1);
-                    explosions.push(new Explosion(player1.x, player1.y));
-                    playExplosionSound();
-                    player1.isHit = true;
-                    setTimeout(() => resetTank(player1, true), new Explosion().lifespan * (1000/60));
+                    destroyTank(player1, true);
                     continue; 
                 }
                 
                 const dist2 = Math.hypot(bullet.x - player2.x, bullet.y - player2.y);
                 if (dist2 < TANK_COLLISION_RADIUS && !player2.isHit) { // Use TANK_COLLISION_RADIUS for bullet-tank
-                    player1Score++;
-                    updateScoreboard();
                     bullets.splice(i, 1);
-                    explosions.push(new Explosion(player2.x, player2.y));
-                    playExplosionSound();
-                    player2.isHit = true;
-                    setTimeout(() => resetTank(player2, false), new Explosion().lifespan * (1000/60));
+                    destroyTank(player2, false);
                     continue;
                 }
                 
@@ -694,9 +921,21 @@
         
         function gameLoop() {
             ctx.clearRect(0, 0, canvas.width, canvas.height);
+            drawGrid();
             handleInput();
 
-            barriers.forEach(barrier => barrier.draw());
+            barriers.forEach(barrier => {
+                barrier.update();
+                if (barrier.type === 'moving') {
+                    if (!player1.isHit && tankOverlapsBarrier(player1, barrier)) {
+                        destroyTank(player1, true);
+                    }
+                    if (!player2.isHit && tankOverlapsBarrier(player2, barrier)) {
+                        destroyTank(player2, false);
+                    }
+                }
+                barrier.draw();
+            });
             
             bullets.forEach(bullet => {
                 bullet.update();
