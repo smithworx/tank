@@ -8,29 +8,31 @@
     <style>
         body {
             margin: 0;
-            padding: 0;
+            padding: 5px;
             display: flex;
             justify-content: center;
             align-items: center;
-            height: 100vh;
+            min-height: 100vh;
             background-color: #1a1a1a;
             color: #fff;
             font-family: 'Bungee', cursive;
-            overflow: hidden;
+            overflow-x: hidden;
         }
         .game-container {
             display: flex;
             flex-direction: column;
             align-items: center;
             text-align: center;
+            width: 100%;
+            max-width: none;
         }
         .scoreboard {
             display: flex;
             justify-content: space-between;
             align-items: center;
-            width: min(85vw, 620px);
-            max-width: 620px;
-            margin-bottom: 10px;
+            width: min(95vw, 800px);
+            max-width: 800px;
+            margin: 5px 0;
             font-size: 1.2rem;
             color: #f1c40f;
             text-shadow: 0 0 8px rgba(241, 196, 15, 0.6);
@@ -45,8 +47,8 @@
             margin-right: 0.35em;
         }
         .scoreboard .player1-label {
-            color: #2ecc71;
-            text-shadow: 0 0 8px rgba(46, 204, 113, 0.6);
+            color: #e74c3c;
+            text-shadow: 0 0 8px rgba(231, 76, 60, 0.6);
         }
         .scoreboard .player2-label {
             color: #3498db;
@@ -56,14 +58,14 @@
             background-color: #2c3e50;
             border-radius: 15px;
             box-shadow: 0 0 20px rgba(0, 255, 255, 0.4);
-            max-width: 100vw;
-            max-height: 80vh;
+            max-width: 98vw;
+            max-height: 85vh;
         }
         h1 {
-            font-size: 3rem;
+            font-size: 2.5rem;
             color: #3498db;
             text-shadow: 0 0 10px #3498db;
-            margin-bottom: 10px;
+            margin: 5px 0;
         }
         .controls {
             display: flex;
@@ -106,14 +108,14 @@
             margin-right: 1em;
         }
         .player1-panel {
-            border: 1px solid rgba(46, 204, 113, 0.2);
+            border: 1px solid rgba(231, 76, 60, 0.2);
         }
         .player2-panel {
             border: 1px solid rgba(52, 152, 219, 0.2);
         }
         .player1-panel h2 {
-            color: #2ecc71;
-            text-shadow: 0 0 8px rgba(46, 204, 113, 0.5);
+            color: #e74c3c;
+            text-shadow: 0 0 8px rgba(231, 76, 60, 0.5);
         }
         .player2-panel h2 {
             color: #3498db;
@@ -121,14 +123,14 @@
         }
         
         .game-mode-selector {
-            margin-bottom: 20px;
+            margin: 10px 0;
             text-align: center;
         }
         
         .game-mode-selector h2 {
             color: #f1c40f;
-            font-size: 1.5rem;
-            margin-bottom: 15px;
+            font-size: 1.3rem;
+            margin: 5px 0 10px 0;
             text-shadow: 0 0 8px rgba(241, 196, 15, 0.6);
         }
         
@@ -165,6 +167,7 @@
             <h2>Select Game Mode</h2>
             <button id="twoPlayerBtn" class="mode-btn">Two Player</button>
             <button id="vsAIBtn" class="mode-btn">vs AI</button>
+            <button id="ctfBtn" class="mode-btn">Capture the Flag</button>
         </div>
         <div class="scoreboard" id="scoreboard" style="display: none;">
             <span><span class="score-label player1-label">Player 1:</span> <strong id="player1ScoreDisplay">0</strong></span>
@@ -203,22 +206,29 @@
 
         // --- Game Setup ---
         function calculateOptimalCanvasDimensions() {
-            // Calculate the maximum desired width based on window size
-            const maxDesiredWidth = Math.min(window.innerWidth * 0.9, 1000);
+            // Calculate the maximum desired width based on window size - use more space
+            const maxDesiredWidth = Math.min(window.innerWidth * 0.95, 1400);
+            
+            // Calculate available height (account for UI elements)
+            const uiHeight = 150; // Reduced height due to more compact UI
+            const maxDesiredHeight = Math.min(window.innerHeight - uiHeight, 1000);
             
             // Use the actual values: TANK_SIZE = 40, BARRIER_SIZE = TANK_SIZE * 1.2 = 48
             const gridSize = 48; // BARRIER_SIZE constant value
             
-            // Calculate how many complete grid squares fit in the maximum desired width
+            // Calculate how many complete grid squares fit in both dimensions
             const maxGridColumns = Math.floor(maxDesiredWidth / gridSize);
+            const maxGridRows = Math.floor(maxDesiredHeight / gridSize);
             
-            // Ensure we have at least a minimum number of columns for playability
-            const minColumns = 10; // Minimum viable playing field
+            // Ensure we have at least minimum dimensions for playability
+            const minColumns = 12; // Increased minimum for larger field
+            const minRows = 8;     // Minimum viable height
             const actualColumns = Math.max(maxGridColumns, minColumns);
+            const actualRows = Math.max(maxGridRows, minRows);
             
-            // Set canvas width to exactly fit those grid squares (maximizes space while staying grid-aligned)
+            // Set canvas dimensions to exactly fit those grid squares
             const alignedWidth = actualColumns * gridSize;
-            const alignedHeight = alignedWidth * 0.6;
+            const alignedHeight = actualRows * gridSize;
             
             return { width: alignedWidth, height: alignedHeight };
         }
@@ -248,22 +258,18 @@
             if (columns >= 2) {
                 ctx.fillStyle = 'rgba(255, 255, 255, 0.08)'; // Increased opacity for better visibility
                 
-                // For even number of columns, draw the two middle columns
-                // For odd number of columns, draw the center column and the one to its right
+                // For even number of columns, draw two middle columns
+                // For odd number of columns, draw just the center column
                 if (columns % 2 === 0) {
-                    // Even columns: draw columns at centerIndex-1 and centerIndex
+                    // Even columns: draw the two middle columns at centerIndex-1 and centerIndex
                     const leftCenterX = (centerIndex - 1) * step;
                     const rightCenterX = centerIndex * step;
                     ctx.fillRect(leftCenterX, 0, step, canvas.height);
                     ctx.fillRect(rightCenterX, 0, step, canvas.height);
                 } else {
-                    // Odd columns: draw center column and the one to its right
+                    // Odd columns: draw just the center column
                     const centerX = centerIndex * step;
-                    const rightCenterX = (centerIndex + 1) * step;
                     ctx.fillRect(centerX, 0, step, canvas.height);
-                    if (centerIndex + 1 < columns) { // Make sure we don't go out of bounds
-                        ctx.fillRect(rightCenterX, 0, step, canvas.height);
-                    }
                 }
             }
 
@@ -556,6 +562,92 @@
             oscillator.stop(audioCtx.currentTime + 0.4);
         }
         
+        function playFlagCaptureSound() {
+            if (!audioCtx || !audioEnabled) return;
+            
+            // Create a triumphant multi-layered victory sound
+            const duration = 1.2;
+            
+            // Main ascending melody
+            const melodyOsc = audioCtx.createOscillator();
+            const melodyGain = audioCtx.createGain();
+            const melodyFilter = audioCtx.createBiquadFilter();
+            
+            melodyOsc.type = 'sawtooth';
+            melodyOsc.frequency.setValueAtTime(440, audioCtx.currentTime); // A4
+            melodyOsc.frequency.exponentialRampToValueAtTime(660, audioCtx.currentTime + 0.2); // E5
+            melodyOsc.frequency.exponentialRampToValueAtTime(880, audioCtx.currentTime + 0.4); // A5
+            melodyOsc.frequency.setValueAtTime(880, audioCtx.currentTime + 0.4);
+            melodyOsc.frequency.exponentialRampToValueAtTime(1320, audioCtx.currentTime + 0.8); // E6
+            
+            melodyFilter.type = 'lowpass';
+            melodyFilter.frequency.setValueAtTime(3000, audioCtx.currentTime);
+            melodyFilter.Q.setValueAtTime(2, audioCtx.currentTime);
+            
+            melodyGain.gain.setValueAtTime(0, audioCtx.currentTime);
+            melodyGain.gain.linearRampToValueAtTime(0.4, audioCtx.currentTime + 0.1);
+            melodyGain.gain.linearRampToValueAtTime(0.5, audioCtx.currentTime + 0.6);
+            melodyGain.gain.exponentialRampToValueAtTime(0.01, audioCtx.currentTime + duration);
+            
+            // Harmonic support (fifth)
+            const harmonyOsc = audioCtx.createOscillator();
+            const harmonyGain = audioCtx.createGain();
+            
+            harmonyOsc.type = 'triangle';
+            harmonyOsc.frequency.setValueAtTime(659, audioCtx.currentTime); // E5
+            harmonyOsc.frequency.exponentialRampToValueAtTime(990, audioCtx.currentTime + 0.2); // B5
+            harmonyOsc.frequency.exponentialRampToValueAtTime(1320, audioCtx.currentTime + 0.4); // E6
+            harmonyOsc.frequency.setValueAtTime(1320, audioCtx.currentTime + 0.4);
+            harmonyOsc.frequency.exponentialRampToValueAtTime(1980, audioCtx.currentTime + 0.8); // B6
+            
+            harmonyGain.gain.setValueAtTime(0, audioCtx.currentTime);
+            harmonyGain.gain.linearRampToValueAtTime(0.25, audioCtx.currentTime + 0.15);
+            harmonyGain.gain.linearRampToValueAtTime(0.3, audioCtx.currentTime + 0.6);
+            harmonyGain.gain.exponentialRampToValueAtTime(0.01, audioCtx.currentTime + duration);
+            
+            // Celebratory high sparkles
+            const sparkleOsc = audioCtx.createOscillator();
+            const sparkleGain = audioCtx.createGain();
+            const sparkleFilter = audioCtx.createBiquadFilter();
+            
+            sparkleOsc.type = 'sine';
+            sparkleOsc.frequency.setValueAtTime(2200, audioCtx.currentTime + 0.3);
+            sparkleOsc.frequency.exponentialRampToValueAtTime(3300, audioCtx.currentTime + 0.5);
+            sparkleOsc.frequency.exponentialRampToValueAtTime(2640, audioCtx.currentTime + 0.7);
+            sparkleOsc.frequency.exponentialRampToValueAtTime(3960, audioCtx.currentTime + 0.9);
+            
+            sparkleFilter.type = 'highpass';
+            sparkleFilter.frequency.setValueAtTime(1500, audioCtx.currentTime);
+            sparkleFilter.Q.setValueAtTime(3, audioCtx.currentTime);
+            
+            sparkleGain.gain.setValueAtTime(0, audioCtx.currentTime + 0.3);
+            sparkleGain.gain.linearRampToValueAtTime(0.15, audioCtx.currentTime + 0.35);
+            sparkleGain.gain.linearRampToValueAtTime(0.2, audioCtx.currentTime + 0.7);
+            sparkleGain.gain.exponentialRampToValueAtTime(0.01, audioCtx.currentTime + duration);
+            
+            // Connect all oscillators
+            melodyOsc.connect(melodyFilter);
+            melodyFilter.connect(melodyGain);
+            melodyGain.connect(sfxGain);
+            
+            harmonyOsc.connect(harmonyGain);
+            harmonyGain.connect(sfxGain);
+            
+            sparkleOsc.connect(sparkleFilter);
+            sparkleFilter.connect(sparkleGain);
+            sparkleGain.connect(sfxGain);
+            
+            // Start all oscillators
+            melodyOsc.start();
+            melodyOsc.stop(audioCtx.currentTime + duration);
+            
+            harmonyOsc.start();
+            harmonyOsc.stop(audioCtx.currentTime + duration);
+            
+            sparkleOsc.start(audioCtx.currentTime + 0.3);
+            sparkleOsc.stop(audioCtx.currentTime + duration);
+        }
+        
         function playTankMoveSound() {
             if (!audioCtx || !audioEnabled) return;
             
@@ -598,12 +690,18 @@
         let player2Score = 0;
         
         // Game mode variables
-        let gameMode = null; // 'twoPlayer' or 'vsAI'
+        let gameMode = null; // 'twoPlayer', 'vsAI', or 'captureTheFlag'
         let gameRunning = false;
         let roundInProgress = false;
         
         // Power-up spawning
         let lastPowerUpSpawn = 0;
+        
+        // CTF variables
+        let redFlag = null;
+        let blueFlag = null;
+        let redBase = null;
+        let blueBase = null;
 
         const TANK_SIZE = 40; // Now a square
         const TURRET_LENGTH = 34; // Shortened by 25%
@@ -2057,6 +2155,216 @@
                 };
             }
         }
+
+        class Flag {
+            constructor(x, y, team, baseX, baseY) {
+                this.x = x;
+                this.y = y;
+                this.baseX = baseX; // Home base position
+                this.baseY = baseY;
+                this.team = team; // 'red' or 'blue'
+                this.size = 30;
+                this.carriedBy = null; // Tank carrying the flag
+                this.isAtBase = true;
+                this.animationFrame = 0;
+                this.dropTime = 0; // When flag was dropped
+                this.returnDelay = 10000; // 10 seconds to auto-return
+                
+                // Visual properties
+                this.color = team === 'red' ? '#e74c3c' : '#3498db';
+                this.lightColor = team === 'red' ? '#ff6b6b' : '#74b9ff';
+            }
+
+            update() {
+                this.animationFrame++;
+                
+                // If flag is carried, move with tank
+                if (this.carriedBy && !this.carriedBy.isHit) {
+                    this.x = this.carriedBy.x;
+                    this.y = this.carriedBy.y - this.size;
+                } else if (this.carriedBy) {
+                    // Tank was destroyed, drop flag
+                    this.drop(this.carriedBy.x, this.carriedBy.y);
+                }
+                
+                // Auto-return dropped flag after delay
+                if (!this.isAtBase && !this.carriedBy) {
+                    const now = Date.now();
+                    if (now - this.dropTime > this.returnDelay) {
+                        this.returnToBase();
+                    }
+                }
+            }
+
+            draw() {
+                ctx.save();
+                ctx.translate(this.x, this.y);
+                
+                // Flag pole
+                ctx.strokeStyle = '#8b4513';
+                ctx.lineWidth = 4;
+                ctx.beginPath();
+                ctx.moveTo(0, 10);
+                ctx.lineTo(0, -this.size);
+                ctx.stroke();
+                
+                // Flag animation
+                const waveOffset = Math.sin(this.animationFrame * 0.1) * 3;
+                
+                // Flag fabric
+                ctx.fillStyle = this.color;
+                ctx.beginPath();
+                ctx.moveTo(0, -this.size);
+                ctx.lineTo(20 + waveOffset, -this.size + 5);
+                ctx.lineTo(18 + waveOffset * 0.8, -this.size + 15);
+                ctx.lineTo(0, -this.size + 10);
+                ctx.closePath();
+                ctx.fill();
+                
+                // Flag highlight
+                ctx.fillStyle = this.lightColor;
+                ctx.globalAlpha = 0.6;
+                ctx.beginPath();
+                ctx.moveTo(0, -this.size);
+                ctx.lineTo(15 + waveOffset * 0.7, -this.size + 3);
+                ctx.lineTo(13 + waveOffset * 0.5, -this.size + 8);
+                ctx.lineTo(0, -this.size + 5);
+                ctx.closePath();
+                ctx.fill();
+                ctx.globalAlpha = 1;
+                
+                // Status indicators
+                if (this.carriedBy) {
+                    // Carried flag glow
+                    ctx.shadowColor = this.color;
+                    ctx.shadowBlur = 15;
+                    ctx.strokeStyle = this.color;
+                    ctx.lineWidth = 2;
+                    ctx.beginPath();
+                    ctx.arc(0, -10, this.size * 0.8, 0, Math.PI * 2);
+                    ctx.stroke();
+                    ctx.shadowBlur = 0;
+                } else if (!this.isAtBase) {
+                    // Dropped flag pulse
+                    const pulse = 0.5 + 0.5 * Math.sin(this.animationFrame * 0.2);
+                    ctx.globalAlpha = pulse;
+                    ctx.strokeStyle = '#ffff00';
+                    ctx.lineWidth = 3;
+                    ctx.beginPath();
+                    ctx.arc(0, 0, this.size, 0, Math.PI * 2);
+                    ctx.stroke();
+                    ctx.globalAlpha = 1;
+                }
+                
+                ctx.restore();
+            }
+
+            checkCollision(tank) {
+                const distance = Math.hypot(tank.x - this.x, tank.y - this.y);
+                return distance < (this.size + TANK_COLLISION_RADIUS);
+            }
+
+            pickup(tank) {
+                if (this.carriedBy || tank.isHit) return false;
+                
+                // Can't pick up own flag unless it's returning it to base
+                if (this.team === (tank === player1 ? 'red' : 'blue')) {
+                    if (!this.isAtBase) {
+                        // Returning own flag to base
+                        this.returnToBase();
+                        return 'returned';
+                    }
+                    return false;
+                }
+                
+                // Enemy picking up flag
+                this.carriedBy = tank;
+                this.isAtBase = false;
+                return 'captured';
+            }
+
+            drop(x, y) {
+                this.carriedBy = null;
+                this.x = x;
+                this.y = y;
+                this.isAtBase = false;
+                this.dropTime = Date.now();
+            }
+
+            returnToBase() {
+                this.x = this.baseX;
+                this.y = this.baseY;
+                this.carriedBy = null;
+                this.isAtBase = true;
+                this.dropTime = 0;
+            }
+
+            isCarriedByTeam(team) {
+                if (!this.carriedBy) return false;
+                const carrierTeam = this.carriedBy === player1 ? 'red' : 'blue';
+                return carrierTeam === team;
+            }
+        }
+
+        class FlagBase {
+            constructor(x, y, team) {
+                this.x = x;
+                this.y = y;
+                this.team = team;
+                this.radius = 50;
+                this.animationFrame = 0;
+                this.color = team === 'red' ? '#e74c3c' : '#3498db';
+                this.lightColor = team === 'red' ? '#ff6b6b' : '#74b9ff';
+            }
+
+            update() {
+                this.animationFrame++;
+            }
+
+            draw() {
+                ctx.save();
+                ctx.translate(this.x, this.y);
+                
+                // Base circle with pulsing effect
+                const pulse = 0.8 + 0.2 * Math.sin(this.animationFrame * 0.05);
+                ctx.globalAlpha = 0.3 * pulse;
+                ctx.fillStyle = this.color;
+                ctx.beginPath();
+                ctx.arc(0, 0, this.radius, 0, Math.PI * 2);
+                ctx.fill();
+                
+                // Base ring
+                ctx.globalAlpha = 0.6;
+                ctx.strokeStyle = this.color;
+                ctx.lineWidth = 4;
+                ctx.beginPath();
+                ctx.arc(0, 0, this.radius, 0, Math.PI * 2);
+                ctx.stroke();
+                
+                // Inner ring
+                ctx.globalAlpha = 0.8;
+                ctx.strokeStyle = this.lightColor;
+                ctx.lineWidth = 2;
+                ctx.beginPath();
+                ctx.arc(0, 0, this.radius * 0.7, 0, Math.PI * 2);
+                ctx.stroke();
+                
+                // Team indicator
+                ctx.globalAlpha = 1;
+                ctx.fillStyle = this.color;
+                ctx.font = 'bold 16px Arial';
+                ctx.textAlign = 'center';
+                ctx.textBaseline = 'middle';
+                ctx.fillText(this.team.toUpperCase() + ' BASE', 0, 0);
+                
+                ctx.restore();
+            }
+
+            checkCollision(tank) {
+                const distance = Math.hypot(tank.x - this.x, tank.y - this.y);
+                return distance < this.radius;
+            }
+        }
         
         let player1, player2;
 
@@ -2068,8 +2376,22 @@
                 player2 = new Tank(canvas.width - TANK_START_MARGIN, canvas.height / 2, '#3498db', '#2980b9');
             } else if (gameMode === 'vsAI') {
                 player2 = new AITank(canvas.width - TANK_START_MARGIN, canvas.height / 2, '#3498db', '#2980b9');
+            } else if (gameMode === 'captureTheFlag') {
+                player2 = new Tank(canvas.width - TANK_START_MARGIN, canvas.height / 2, '#3498db', '#2980b9');
+                
+                // Initialize CTF elements
+                const baseY = canvas.height / 2;
+                redBase = new FlagBase(80, baseY, 'red');
+                blueBase = new FlagBase(canvas.width - 80, baseY, 'blue');
+                
+                redFlag = new Flag(80, baseY, 'red', 80, baseY);
+                blueFlag = new Flag(canvas.width - 80, baseY, 'blue', canvas.width - 80, baseY);
             }
-            player2.angle = Math.PI;
+            
+            // Ensure player2 is properly oriented regardless of game mode
+            if (player2) {
+                player2.angle = Math.PI;
+            }
         }
 
         function updateScoreboard() {
@@ -2137,29 +2459,33 @@
                             
                             if ((direction === 'horizontal' && currentCol >= gridCols) || (direction === 'vertical' && currentRow >= gridRows) || occupied.has(currentKey)) break;
                             
-                            const x = currentCol * barrierSize + barrierSize / 2;
-                            const y = currentRow * barrierSize + barrierSize / 2;
-                            const randomHealth = Math.floor(Math.random() * 3) + 1;
-                            const baseOptions = { type: barrierType };
-                            if (barrierType === 'breakable') {
-                                baseOptions.health = randomHealth;
-                            } else if (barrierType === 'moving') {
-                                baseOptions.axis = Math.random() < 0.5 ? 'horizontal' : 'vertical';
-                                baseOptions.speed = MOVING_BARRIER_SPEED + Math.random() * 0.6;
-                                baseOptions.range = barrierSize * MOVING_BARRIER_RANGE_MULTIPLIER;
-                                baseOptions.initialDirection = Math.random() < 0.5 ? 1 : -1;
-                                baseOptions.health = Infinity;
-                            }
-                            
-                            occupied.add(currentKey);
-                            const mirrorOptions = Object.assign({}, baseOptions);
-                            if (baseOptions.type === 'moving') {
-                                mirrorOptions.initialDirection = -(baseOptions.initialDirection || 1);
-                            }
-                            barriers.push(new Barrier(x, y, barrierInteriorSize, barrierInteriorSize, Object.assign({}, baseOptions)));
-                            barriers.push(new Barrier(canvas.width - x, y, barrierInteriorSize, barrierInteriorSize, mirrorOptions));
-                            
-                            if (direction === 'horizontal') currentCol++;
+                        const x = currentCol * barrierSize + barrierSize / 2;
+                        const y = currentRow * barrierSize + barrierSize / 2;
+                        
+                        // Generate all random values once for perfect symmetry
+                        const randomHealth = Math.floor(Math.random() * 3) + 1;
+                        const randomAxis = Math.random() < 0.5 ? 'horizontal' : 'vertical';
+                        const randomSpeed = MOVING_BARRIER_SPEED + Math.random() * 0.6;
+                        const randomDirection = Math.random() < 0.5 ? 1 : -1;
+                        
+                        const baseOptions = { type: barrierType };
+                        if (barrierType === 'breakable') {
+                            baseOptions.health = randomHealth;
+                        } else if (barrierType === 'moving') {
+                            baseOptions.axis = randomAxis;
+                            baseOptions.speed = randomSpeed;
+                            baseOptions.range = barrierSize * MOVING_BARRIER_RANGE_MULTIPLIER;
+                            baseOptions.initialDirection = randomDirection;
+                            baseOptions.health = Infinity;
+                        }
+                        
+                        occupied.add(currentKey);
+                        const mirrorOptions = Object.assign({}, baseOptions);
+                        if (baseOptions.type === 'moving') {
+                            mirrorOptions.initialDirection = -randomDirection; // Use the same random value, just negate it
+                        }
+                        barriers.push(new Barrier(x, y, barrierInteriorSize, barrierInteriorSize, Object.assign({}, baseOptions)));
+                        barriers.push(new Barrier(canvas.width - x, y, barrierInteriorSize, barrierInteriorSize, mirrorOptions));                            if (direction === 'horizontal') currentCol++;
                             else currentRow++;
                         }
                     }
@@ -2251,9 +2577,12 @@
                             }
                             
                             // Create single organic ice patch instead of multiple grid squares
+                            // Generate all random values once for perfect symmetry
                             const iceSize = 50 + Math.random() * 50; // Random size between 50-100 pixels
-                            const iceWidth = iceSize + (Math.random() - 0.5) * 25; // Irregular width
-                            const iceHeight = iceSize + (Math.random() - 0.5) * 25; // Irregular height
+                            const iceWidthVariation = (Math.random() - 0.5) * 25;
+                            const iceHeightVariation = (Math.random() - 0.5) * 25;
+                            const iceWidth = iceSize + iceWidthVariation; // Irregular width
+                            const iceHeight = iceSize + iceHeightVariation; // Irregular height
                             
                             // Add some random offset from grid alignment
                             const offsetX = (Math.random() - 0.5) * (barrierSize * 0.3);
@@ -2267,20 +2596,22 @@
                             
                             hazards.push(new EnvironmentalHazard(finalX, finalY, iceWidth, iceHeight, 'ice'));
                             
-                            // Create mirrored ice patch on the other side
-                            const mirrorIceWidth = iceSize + (Math.random() - 0.5) * 25;
-                            const mirrorIceHeight = iceSize + (Math.random() - 0.5) * 25;
-                            const mirrorOffsetY = (Math.random() - 0.5) * (barrierSize * 0.3);
+                            // Create perfectly mirrored ice patch on the other side
+                            const mirrorIceWidth = iceSize + iceWidthVariation; // Use same variation
+                            const mirrorIceHeight = iceSize + iceHeightVariation; // Use same variation
                             const mirrorX = canvas.width - finalX;
-                            const mirrorY = y + mirrorOffsetY;
+                            const mirrorY = y + offsetY; // Use same Y offset
                             const finalMirrorY = Math.max(mirrorIceHeight/2 + 10, Math.min(canvas.height - mirrorIceHeight/2 - 10, mirrorY));
                             
                             hazards.push(new EnvironmentalHazard(mirrorX, finalMirrorY, mirrorIceWidth, mirrorIceHeight, 'ice'));
                         } else {
                             // Create larger irregular lava pool with random shape
+                            // Generate all random values once for perfect symmetry
                             const lavaSize = 60 + Math.random() * 60; // Random size between 60-120 pixels (bigger than grid)
-                            const lavaWidth = lavaSize + (Math.random() - 0.5) * 30; // More irregular width
-                            const lavaHeight = lavaSize + (Math.random() - 0.5) * 30; // More irregular height
+                            const lavaWidthVariation = (Math.random() - 0.5) * 30;
+                            const lavaHeightVariation = (Math.random() - 0.5) * 30;
+                            const lavaWidth = lavaSize + lavaWidthVariation; // More irregular width
+                            const lavaHeight = lavaSize + lavaHeightVariation; // More irregular height
                             
                             // Add some random offset from grid alignment for more natural placement
                             const offsetX = (Math.random() - 0.5) * (barrierSize * 0.3);
@@ -2294,12 +2625,11 @@
                             
                             hazards.push(new EnvironmentalHazard(finalX, finalY, lavaWidth, lavaHeight, 'lava'));
                             
-                            // Create mirrored lava pool on the other side with slightly different shape
-                            const mirrorLavaWidth = lavaSize + (Math.random() - 0.5) * 20;
-                            const mirrorLavaHeight = lavaSize + (Math.random() - 0.5) * 20;
-                            const mirrorOffsetY = (Math.random() - 0.5) * (barrierSize * 0.3);
+                            // Create perfectly mirrored lava pool on the other side
+                            const mirrorLavaWidth = lavaSize + lavaWidthVariation; // Use same variations
+                            const mirrorLavaHeight = lavaSize + lavaHeightVariation; // Use same variations
                             const mirrorX = canvas.width - finalX;
-                            const mirrorY = y + mirrorOffsetY;
+                            const mirrorY = y + offsetY; // Use same Y offset
                             const finalMirrorY = Math.max(mirrorLavaHeight/2 + 10, Math.min(canvas.height - mirrorLavaHeight/2 - 10, mirrorY));
                             
                             hazards.push(new EnvironmentalHazard(mirrorX, finalMirrorY, mirrorLavaWidth, mirrorLavaHeight, 'lava'));
@@ -2354,12 +2684,27 @@
 
         function destroyTank(tank, isPlayer1Tank) {
             if (tank.isHit) return;
-            if (isPlayer1Tank) {
-                player2Score++;
-            } else {
-                player1Score++;
+            
+            // In CTF mode, don't award kill points, only flag captures count
+            if (gameMode !== 'captureTheFlag') {
+                if (isPlayer1Tank) {
+                    player2Score++;
+                } else {
+                    player1Score++;
+                }
+                updateScoreboard();
             }
-            updateScoreboard();
+            
+            // Drop any carried flags in CTF mode
+            if (gameMode === 'captureTheFlag') {
+                if (redFlag && redFlag.carriedBy === tank) {
+                    redFlag.drop(tank.x, tank.y);
+                }
+                if (blueFlag && blueFlag.carriedBy === tank) {
+                    blueFlag.drop(tank.x, tank.y);
+                }
+            }
+            
             const explosion = new Explosion(tank.x, tank.y);
             explosions.push(explosion);
             playExplosionSound();
@@ -2478,6 +2823,12 @@
             hazards.length = 0;
             powerUps.length = 0;
             
+            // Clear CTF objects
+            redFlag = null;
+            blueFlag = null;
+            redBase = null;
+            blueBase = null;
+            
             // Reset power-up spawning
             lastPowerUpSpawn = Date.now();
             
@@ -2567,8 +2918,8 @@
             handleTankMovement(player1, 'KeyW', 'KeyS', 'KeyA', 'KeyD', player2);
             if (keys['Space']) player1.fire();
            
-            // Player 2 controls (only in two-player mode)
-            if (gameMode === 'twoPlayer') {
+            // Player 2 controls (in two-player mode and CTF mode)
+            if (gameMode === 'twoPlayer' || gameMode === 'captureTheFlag') {
                 handleTankMovement(player2, 'ArrowUp', 'ArrowDown', 'ArrowLeft', 'ArrowRight', player1);
                 if (keys['Enter']) player2.fire();
             }
@@ -2852,6 +3203,76 @@
                 }
             }
             
+            // CTF game mode logic
+            if (gameMode === 'captureTheFlag' && redFlag && blueFlag && redBase && blueBase) {
+                // Update flags and bases
+                redFlag.update();
+                blueFlag.update();
+                redBase.update();
+                blueBase.update();
+                
+                // Draw bases first (behind flags)
+                redBase.draw();
+                blueBase.draw();
+                
+                // Check flag interactions
+                if (!player1.isHit) {
+                    // Player 1 (red team) interactions
+                    if (blueFlag.checkCollision(player1)) {
+                        const result = blueFlag.pickup(player1);
+                        if (result === 'captured') {
+                            playPowerUpSound(); // Reuse sound for flag pickup
+                        }
+                    }
+                    
+                    if (redFlag.checkCollision(player1)) {
+                        const result = redFlag.pickup(player1);
+                        if (result === 'returned') {
+                            playTeleportSound(); // Different sound for flag return
+                        }
+                    }
+                    
+                    // Check for scoring (carrying enemy flag to own base)
+                    if (blueFlag.carriedBy === player1 && redBase.checkCollision(player1)) {
+                        // Score for red team!
+                        player1Score++;
+                        updateScoreboard();
+                        blueFlag.returnToBase();
+                        playFlagCaptureSound(); // Exciting victory sound
+                    }
+                }
+                
+                if (!player2.isHit) {
+                    // Player 2 (blue team) interactions
+                    if (redFlag.checkCollision(player2)) {
+                        const result = redFlag.pickup(player2);
+                        if (result === 'captured') {
+                            playPowerUpSound();
+                        }
+                    }
+                    
+                    if (blueFlag.checkCollision(player2)) {
+                        const result = blueFlag.pickup(player2);
+                        if (result === 'returned') {
+                            playTeleportSound();
+                        }
+                    }
+                    
+                    // Check for scoring (carrying enemy flag to own base)
+                    if (redFlag.carriedBy === player2 && blueBase.checkCollision(player2)) {
+                        // Score for blue team!
+                        player2Score++;
+                        updateScoreboard();
+                        redFlag.returnToBase();
+                        playFlagCaptureSound(); // Exciting victory sound
+                    }
+                }
+                
+                // Draw flags (on top of bases)
+                redFlag.draw();
+                blueFlag.draw();
+            }
+            
             bullets.forEach(bullet => {
                 bullet.update();
                 bullet.draw();
@@ -2920,6 +3341,11 @@
             startGame();
         });
 
+        document.getElementById('ctfBtn').addEventListener('click', function() {
+            gameMode = 'captureTheFlag';
+            startGame();
+        });
+
         function startGame() {
             // Hide mode selection and show game
             document.getElementById('gameModeSelector').style.display = 'none';
@@ -2945,14 +3371,21 @@
             const controls = document.getElementById('controls');
             if (gameMode === 'twoPlayer') {
                 controls.innerHTML = `
-                    <div><strong>Player 1 (Red):</strong> WASD to move, Space to shoot</div>
-                    <div><strong>Player 2 (Blue):</strong> Arrow keys to move, Enter to shoot</div>
+                    <div><strong style="color: #e74c3c; text-shadow: 0 0 8px rgba(231, 76, 60, 0.6);">Player 1:</strong> WASD to move, Space to shoot</div>
+                    <div><strong style="color: #3498db; text-shadow: 0 0 8px rgba(52, 152, 219, 0.6);">Player 2:</strong> Arrow keys to move, Enter to shoot</div>
                     <div>Press 'R' to restart, '-' for debug info, 'M' to toggle audio</div>
                 `;
             } else if (gameMode === 'vsAI') {
                 controls.innerHTML = `
-                    <div><strong>Player (Red):</strong> WASD to move, Space to shoot</div>
-                    <div><strong>AI (Blue):</strong> Controlled by computer</div>
+                    <div><strong style="color: #e74c3c; text-shadow: 0 0 8px rgba(231, 76, 60, 0.6);">Player:</strong> WASD to move, Space to shoot</div>
+                    <div><strong style="color: #3498db; text-shadow: 0 0 8px rgba(52, 152, 219, 0.6);">AI:</strong> Controlled by computer</div>
+                    <div>Press 'R' to restart, '-' for debug info, 'M' to toggle audio</div>
+                `;
+            } else if (gameMode === 'captureTheFlag') {
+                controls.innerHTML = `
+                    <div><strong style="color: #e74c3c; text-shadow: 0 0 8px rgba(231, 76, 60, 0.6);">Red Team:</strong> WASD to move, Space to shoot</div>
+                    <div><strong style="color: #3498db; text-shadow: 0 0 8px rgba(52, 152, 219, 0.6);">Blue Team:</strong> Arrow keys to move, Enter to shoot</div>
+                    <div><strong>Objective:</strong> Capture the enemy flag and return it to your base!</div>
                     <div>Press 'R' to restart, '-' for debug info, 'M' to toggle audio</div>
                 `;
             }
